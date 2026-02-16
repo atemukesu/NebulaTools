@@ -147,5 +147,6 @@
     "compress_keyframe_interval_desc": "Insert an I-Frame (full snapshot) every N frames. More I-Frames = larger file but faster seeking. (0 = every frame is an I-Frame)",
     "compress_zstd_level": "Zstd Compression Level",
     "compress_zstd_level_desc": "Higher level = better compression ratio but slower encoding. Range: 1-5.",
-    "compress_export": "Export Compressed .nbl"
+    "compress_export": "Export Compressed .nbl",
+    "compress_progress": "Compressing..."
 }

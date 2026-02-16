@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 const MAGIC: &[u8; 8] = b"NEBULAFX";
 
@@ -40,6 +41,7 @@ pub struct Particle {
 
 pub struct PlayerState {
     pub file: Option<File>,
+    pub file_path: Option<PathBuf>,
     pub header: Option<NblHeader>,
     pub textures: Vec<TextureEntry>,
     pub frame_indices: Vec<(u64, u32)>,
@@ -55,6 +57,7 @@ impl Default for PlayerState {
     fn default() -> Self {
         Self {
             file: None,
+            file_path: None,
             header: None,
             textures: Vec::new(),
             frame_indices: Vec::new(),
@@ -69,7 +72,7 @@ impl Default for PlayerState {
 
 impl PlayerState {
     pub fn load_file(&mut self, path: PathBuf) -> Result<()> {
-        let mut f = File::open(path)?;
+        let mut f = File::open(&path)?;
 
         let mut magic = [0u8; 8];
         f.read_exact(&mut magic)?;
@@ -125,6 +128,7 @@ impl PlayerState {
         }
 
         self.file = Some(f);
+        self.file_path = Some(path);
         self.current_frame_idx = -1;
         self.particles.clear();
         self.is_playing = false;
@@ -167,7 +171,7 @@ impl PlayerState {
         Ok(())
     }
 
-    fn process_frame(&mut self, frame_idx: u32) -> Result<()> {
+    pub(crate) fn process_frame(&mut self, frame_idx: u32) -> Result<()> {
         let (offset, size) = self.frame_indices[frame_idx as usize];
         let file = self.file.as_mut().unwrap();
 
@@ -745,24 +749,79 @@ fn encode_p_frame(prev_particles: &[Particle], cur_particles: &[Particle]) -> Ve
     buf
 }
 
-/// Write a complete NBL file using I/P frame compression.
-/// - `keyframe_interval`: number of frames between I-Frames (0 = all I-Frames).
-/// - `zstd_level`: Zstd compression level (1-5).
-pub fn save_file_compressed(
-    path: &PathBuf,
-    header: &NblHeader,
-    textures: &[TextureEntry],
-    frames: &[Vec<Particle>],
+/// Progress tracker for background compression.
+pub struct CompressProgress {
+    pub total_frames: u32,
+    pub current_frame: u32,
+    pub is_done: bool,
+    pub error: Option<String>,
+    pub start_time: std::time::Instant,
+}
+
+/// Stream-compress an NBL file from source to output using I/P frame encoding.
+/// Reads frames one-at-a-time from the source file to avoid loading everything into memory.
+/// Reports progress via `CompressProgress`.
+pub fn streaming_compress(
+    source_path: PathBuf,
+    output_path: PathBuf,
     keyframe_interval: u32,
     zstd_level: i32,
+    progress: Arc<Mutex<CompressProgress>>,
 ) -> Result<()> {
-    let mut f = File::create(path)?;
+    // 1. Open source file and read metadata
+    let mut player = PlayerState::default();
+    player.load_file(source_path)?;
 
-    // 1. Header (48 bytes)
+    let header = player.header.as_ref().ok_or(anyhow!("No header"))?.clone();
+    let textures = player.textures.clone();
+    let total_frames = header.total_frames;
+
+    // Reset state for sequential processing
+    player.particles.clear();
+    player.current_frame_idx = -1;
+
+    let effective_interval = if keyframe_interval == 0 {
+        1
+    } else {
+        keyframe_interval
+    };
+    let mut keyframe_list: Vec<u32> = Vec::new();
+    let mut compressed_blobs: Vec<Vec<u8>> = Vec::with_capacity(total_frames as usize);
+    let mut prev_snapshot: Vec<Particle> = Vec::new();
+
+    // 2. Process each frame one-at-a-time (streaming read)
+    for frame_idx in 0..total_frames {
+        player.process_frame(frame_idx)?;
+        player.current_frame_idx = frame_idx as i32;
+
+        let snapshot: Vec<Particle> = player.particles.values().cloned().collect();
+        let is_keyframe = frame_idx % effective_interval == 0;
+
+        let raw = if is_keyframe || frame_idx == 0 {
+            keyframe_list.push(frame_idx);
+            encode_i_frame(&snapshot)
+        } else {
+            encode_p_frame(&prev_snapshot, &snapshot)
+        };
+
+        let compressed = zstd::encode_all(Cursor::new(&raw), zstd_level)?;
+        compressed_blobs.push(compressed);
+        prev_snapshot = snapshot;
+
+        // Update progress
+        if let Ok(mut p) = progress.lock() {
+            p.current_frame = frame_idx + 1;
+        }
+    }
+
+    // 3. Write output file
+    let mut f = File::create(&output_path)?;
+
+    // Header (48 bytes)
     f.write_all(MAGIC)?;
     f.write_u16::<LittleEndian>(header.version)?;
     f.write_u16::<LittleEndian>(header.target_fps)?;
-    f.write_u32::<LittleEndian>(frames.len() as u32)?;
+    f.write_u32::<LittleEndian>(total_frames)?;
     f.write_u16::<LittleEndian>(textures.len() as u16)?;
     f.write_u16::<LittleEndian>(header.attributes)?;
     for v in &header.bbox_min {
@@ -771,10 +830,10 @@ pub fn save_file_compressed(
     for v in &header.bbox_max {
         f.write_f32::<LittleEndian>(*v)?;
     }
-    f.write_all(&[0u8; 4])?; // Reserved
+    f.write_all(&[0u8; 4])?;
 
-    // 2. Texture block
-    for tex in textures {
+    // Texture block
+    for tex in &textures {
         let path_bytes = tex.path.as_bytes();
         f.write_u16::<LittleEndian>(path_bytes.len() as u16)?;
         f.write_all(path_bytes)?;
@@ -782,68 +841,45 @@ pub fn save_file_compressed(
         f.write_u8(tex.cols)?;
     }
 
-    // 3. Determine which frames are keyframes
-    let effective_interval = if keyframe_interval == 0 {
-        1
-    } else {
-        keyframe_interval
-    };
-    let mut keyframe_frame_indices: Vec<u32> = Vec::new();
-    for i in 0..frames.len() {
-        if (i as u32) % effective_interval == 0 {
-            keyframe_frame_indices.push(i as u32);
-        }
-    }
-
-    // 4. Encode all frames to compressed blobs
-    let mut compressed_blobs: Vec<Vec<u8>> = Vec::with_capacity(frames.len());
-    for (i, frame_particles) in frames.iter().enumerate() {
-        let is_keyframe = keyframe_frame_indices.contains(&(i as u32));
-        let raw = if is_keyframe || i == 0 {
-            encode_i_frame(frame_particles)
-        } else {
-            encode_p_frame(&frames[i - 1], frame_particles)
-        };
-        let compressed = zstd::encode_all(Cursor::new(&raw), zstd_level)?;
-        compressed_blobs.push(compressed);
-    }
-
-    // 5. Calculate offsets
+    // Calculate offsets
     let mut tex_block_size: usize = 0;
-    for tex in textures {
+    for tex in &textures {
         tex_block_size += 2 + tex.path.as_bytes().len() + 1 + 1;
     }
-
-    let frame_index_table_size = frames.len() * 12;
-    let keyframe_count = keyframe_frame_indices.len();
+    let frame_index_table_size = total_frames as usize * 12;
+    let keyframe_count = keyframe_list.len();
     let keyframe_index_table_size = 4 + keyframe_count * 4;
-
     let data_start = 48 + tex_block_size + frame_index_table_size + keyframe_index_table_size;
 
     let mut current_offset = data_start;
-    let mut index_entries: Vec<(u64, u32)> = Vec::with_capacity(frames.len());
+    let mut index_entries: Vec<(u64, u32)> = Vec::with_capacity(total_frames as usize);
     for blob in &compressed_blobs {
         index_entries.push((current_offset as u64, blob.len() as u32));
         current_offset += blob.len();
     }
 
-    // 6. Write Frame Index Table
+    // Frame Index Table
     for (offset, size) in &index_entries {
         f.write_u64::<LittleEndian>(*offset)?;
         f.write_u32::<LittleEndian>(*size)?;
     }
 
-    // 7. Write Keyframe Index Table
+    // Keyframe Index Table
     f.write_u32::<LittleEndian>(keyframe_count as u32)?;
-    for &kf_idx in &keyframe_frame_indices {
+    for &kf_idx in &keyframe_list {
         f.write_u32::<LittleEndian>(kf_idx)?;
     }
 
-    // 8. Write compressed frame data
+    // Frame data
     for blob in &compressed_blobs {
         f.write_all(blob)?;
     }
 
     f.flush()?;
+
+    if let Ok(mut p) = progress.lock() {
+        p.is_done = true;
+    }
+
     Ok(())
 }

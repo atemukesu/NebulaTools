@@ -147,5 +147,6 @@
     "compress_keyframe_interval_desc": "N フレームごとに I フレーム（完全スナップショット）を挿入します。I フレームが多い = ファイルが大きいがシークが高速。(0 = 全フレームが I フレーム)",
     "compress_zstd_level": "Zstd 圧縮レベル",
     "compress_zstd_level_desc": "レベルが高い = 圧縮率が良いがエンコードが遅い。範囲: 1-5。",
-    "compress_export": "圧縮 .nbl をエクスポート"
+    "compress_export": "圧縮 .nbl をエクスポート",
+    "compress_progress": "圧縮中..."
 }

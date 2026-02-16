@@ -147,5 +147,6 @@
     "compress_keyframe_interval_desc": "每隔 N 帧插入一个 I 帧（完整快照）。I 帧越多 = 文件越大但跳转越快。(0 = 每一帧都是 I 帧)",
     "compress_zstd_level": "Zstd 压缩等级",
     "compress_zstd_level_desc": "等级越高 = 压缩率越好但编码越慢。范围：1-5。",
-    "compress_export": "导出压缩 .nbl"
+    "compress_export": "导出压缩 .nbl",
+    "compress_progress": "压缩中..."
 }

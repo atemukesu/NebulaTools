@@ -78,6 +78,8 @@ pub struct EditState {
     pub edited_header: Option<NblHeader>,
     pub compress_keyframe_interval: u32,
     pub compress_zstd_level: i32,
+    pub compress_progress:
+        Option<std::sync::Arc<std::sync::Mutex<crate::player::CompressProgress>>>,
 }
 
 impl Default for EditState {
@@ -101,6 +103,7 @@ impl Default for EditState {
             edited_header: None,
             compress_keyframe_interval: 60,
             compress_zstd_level: 3,
+            compress_progress: None,
         }
     }
 }
