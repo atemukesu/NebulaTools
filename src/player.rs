@@ -1,8 +1,8 @@
 use anyhow::{anyhow, Result};
-use byteorder::{LittleEndian, ReadBytesExt};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{Cursor, Read, Seek, SeekFrom};
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
 const MAGIC: &[u8; 8] = b"NEBULAFX";
@@ -305,4 +305,344 @@ impl PlayerState {
         self.particles.retain(|k, _| current_frame_ids.contains(k));
         Ok(())
     }
+
+    /// Decode every frame in the file into a Vec of particle snapshots.
+    /// Each entry is a Vec<Particle> representing the state at that frame.
+    pub fn decode_all_frames(&mut self) -> Result<Vec<Vec<Particle>>> {
+        let total = self
+            .header
+            .as_ref()
+            .ok_or(anyhow!("No header"))?
+            .total_frames;
+        let mut all_frames: Vec<Vec<Particle>> = Vec::with_capacity(total as usize);
+
+        // Reset state before decoding
+        self.particles.clear();
+        self.current_frame_idx = -1;
+
+        for frame_idx in 0..total {
+            self.process_frame(frame_idx)?;
+            let snapshot: Vec<Particle> = self.particles.values().cloned().collect();
+            all_frames.push(snapshot);
+            self.current_frame_idx = frame_idx as i32;
+        }
+
+        // Reset playback state after full decode
+        self.particles.clear();
+        self.current_frame_idx = -1;
+        if total > 0 {
+            self.seek_to(0)?;
+        }
+
+        Ok(all_frames)
+    }
+
+    /// Write a complete NBL file from frame snapshots.
+    /// Uses I-Frames only for simplicity and maximum compatibility.
+    pub fn save_file(
+        &self,
+        path: &PathBuf,
+        header: &NblHeader,
+        textures: &[TextureEntry],
+        frames: &[Vec<Particle>],
+    ) -> Result<()> {
+        let mut f = File::create(path)?;
+
+        // 1. Header (48 bytes)
+        f.write_all(MAGIC)?;
+        f.write_u16::<LittleEndian>(header.version)?;
+        f.write_u16::<LittleEndian>(header.target_fps)?;
+        f.write_u32::<LittleEndian>(frames.len() as u32)?;
+        f.write_u16::<LittleEndian>(textures.len() as u16)?;
+        f.write_u16::<LittleEndian>(header.attributes)?;
+        for v in &header.bbox_min {
+            f.write_f32::<LittleEndian>(*v)?;
+        }
+        for v in &header.bbox_max {
+            f.write_f32::<LittleEndian>(*v)?;
+        }
+        f.write_all(&[0u8; 4])?; // Reserved
+
+        // 2. Texture block
+        for tex in textures {
+            let path_bytes = tex.path.as_bytes();
+            f.write_u16::<LittleEndian>(path_bytes.len() as u16)?;
+            f.write_all(path_bytes)?;
+            f.write_u8(tex.rows)?;
+            f.write_u8(tex.cols)?;
+        }
+
+        // 3. Encode all frames to compressed blobs
+        let mut compressed_blobs: Vec<Vec<u8>> = Vec::with_capacity(frames.len());
+        for frame_particles in frames {
+            let raw = encode_i_frame(frame_particles);
+            let compressed = zstd::encode_all(Cursor::new(&raw), 3)?;
+            compressed_blobs.push(compressed);
+        }
+
+        // 4. Calculate offsets for the Frame Index Table
+        // Header (48) + Texture block size + Frame Index Table size + Keyframe Index Table size
+        let mut tex_block_size: usize = 0;
+        for tex in textures {
+            tex_block_size += 2 + tex.path.as_bytes().len() + 1 + 1;
+        }
+
+        let frame_index_table_size = frames.len() * 12; // 8 (u64 offset) + 4 (u32 size) per frame
+
+        // All frames are keyframes (I-Frames)
+        let keyframe_count = frames.len() as u32;
+        let keyframe_index_table_size = 4 + frames.len() * 4; // u32 count + u32 * N
+
+        let data_start = 48 + tex_block_size + frame_index_table_size + keyframe_index_table_size;
+
+        // Build frame index entries
+        let mut current_offset = data_start;
+        let mut index_entries: Vec<(u64, u32)> = Vec::with_capacity(frames.len());
+        for blob in &compressed_blobs {
+            index_entries.push((current_offset as u64, blob.len() as u32));
+            current_offset += blob.len();
+        }
+
+        // 5. Write Frame Index Table
+        for (offset, size) in &index_entries {
+            f.write_u64::<LittleEndian>(*offset)?;
+            f.write_u32::<LittleEndian>(*size)?;
+        }
+
+        // 6. Write Keyframe Index Table (all frames are keyframes)
+        f.write_u32::<LittleEndian>(keyframe_count)?;
+        for i in 0..frames.len() {
+            f.write_u32::<LittleEndian>(i as u32)?;
+        }
+
+        // 7. Write compressed frame data
+        for blob in &compressed_blobs {
+            f.write_all(blob)?;
+        }
+
+        f.flush()?;
+        Ok(())
+    }
+}
+
+/// Encode a single frame snapshot as an I-Frame (uncompressed raw bytes).
+fn encode_i_frame(particles: &[Particle]) -> Vec<u8> {
+    let n = particles.len();
+    // Header: 1 byte FrameType + 4 bytes ParticleCount
+    // Payload: see spec
+    let payload_size = 5 + n * 4 * 3 + n * 4 + n * 2 + n + n + n * 4;
+    let mut buf = Vec::with_capacity(payload_size);
+
+    buf.push(0u8); // FrameType = I-Frame
+    let _ = buf.write_u32::<LittleEndian>(n as u32);
+
+    // SoA: X, Y, Z
+    for p in particles {
+        let _ = buf.write_f32::<LittleEndian>(p.pos[0]);
+    }
+    for p in particles {
+        let _ = buf.write_f32::<LittleEndian>(p.pos[1]);
+    }
+    for p in particles {
+        let _ = buf.write_f32::<LittleEndian>(p.pos[2]);
+    }
+
+    // SoA: R, G, B, A
+    for p in particles {
+        buf.push(p.color[0]);
+    }
+    for p in particles {
+        buf.push(p.color[1]);
+    }
+    for p in particles {
+        buf.push(p.color[2]);
+    }
+    for p in particles {
+        buf.push(p.color[3]);
+    }
+
+    // Sizes (u16, scaled by 100)
+    for p in particles {
+        let size_u16 = (p.size * 100.0).round().clamp(0.0, 65535.0) as u16;
+        let _ = buf.write_u16::<LittleEndian>(size_u16);
+    }
+
+    // Texture IDs
+    for p in particles {
+        buf.push(p.tex_id);
+    }
+
+    // Sequence Indices
+    for p in particles {
+        buf.push(p.seq_index);
+    }
+
+    // Particle IDs
+    for p in particles {
+        let _ = buf.write_i32::<LittleEndian>(p.id);
+    }
+
+    buf
+}
+
+// ======== Edit Transform Functions ========
+
+/// Change the target FPS without modifying frame data.
+pub fn edit_change_fps(header: &mut NblHeader, new_fps: u16) {
+    header.target_fps = new_fps;
+}
+
+/// Interpolate frames to change animation speed while keeping FPS constant.
+/// speed_factor > 1.0 = faster (fewer frames), speed_factor < 1.0 = slower (more frames).
+pub fn edit_interpolate_frames(frames: &[Vec<Particle>], speed_factor: f32) -> Vec<Vec<Particle>> {
+    if frames.is_empty() || speed_factor <= 0.0 {
+        return frames.to_vec();
+    }
+
+    let new_count = ((frames.len() as f32) / speed_factor).round().max(1.0) as usize;
+    let mut result = Vec::with_capacity(new_count);
+
+    for i in 0..new_count {
+        let src_pos = (i as f32) * (frames.len() as f32 - 1.0) / (new_count as f32 - 1.0).max(1.0);
+        let idx_a = (src_pos.floor() as usize).min(frames.len() - 1);
+        let idx_b = (idx_a + 1).min(frames.len() - 1);
+        let t = src_pos - idx_a as f32;
+
+        if idx_a == idx_b || t < 0.001 {
+            result.push(frames[idx_a].clone());
+        } else {
+            result.push(lerp_particles(&frames[idx_a], &frames[idx_b], t));
+        }
+    }
+
+    result
+}
+
+/// Linearly interpolate between two particle snapshots.
+fn lerp_particles(a: &[Particle], b: &[Particle], t: f32) -> Vec<Particle> {
+    let a_map: HashMap<i32, &Particle> = a.iter().map(|p| (p.id, p)).collect();
+    let b_map: HashMap<i32, &Particle> = b.iter().map(|p| (p.id, p)).collect();
+
+    let mut result = Vec::new();
+
+    // Interpolate particles present in both frames
+    for pa in a {
+        if let Some(pb) = b_map.get(&pa.id) {
+            result.push(Particle {
+                id: pa.id,
+                pos: [
+                    pa.pos[0] + (pb.pos[0] - pa.pos[0]) * t,
+                    pa.pos[1] + (pb.pos[1] - pa.pos[1]) * t,
+                    pa.pos[2] + (pb.pos[2] - pa.pos[2]) * t,
+                ],
+                color: [
+                    lerp_u8(pa.color[0], pb.color[0], t),
+                    lerp_u8(pa.color[1], pb.color[1], t),
+                    lerp_u8(pa.color[2], pb.color[2], t),
+                    lerp_u8(pa.color[3], pb.color[3], t),
+                ],
+                size: pa.size + (pb.size - pa.size) * t,
+                tex_id: if t < 0.5 { pa.tex_id } else { pb.tex_id },
+                seq_index: if t < 0.5 { pa.seq_index } else { pb.seq_index },
+            });
+        } else if t < 0.5 {
+            // Particle only in frame A, keep if closer to A
+            result.push(pa.clone());
+        }
+    }
+
+    // Particles only in frame B, add if closer to B
+    if t >= 0.5 {
+        for pb in b {
+            if !a_map.contains_key(&pb.id) {
+                result.push(pb.clone());
+            }
+        }
+    }
+
+    result
+}
+
+fn lerp_u8(a: u8, b: u8, t: f32) -> u8 {
+    (a as f32 + (b as f32 - a as f32) * t)
+        .round()
+        .clamp(0.0, 255.0) as u8
+}
+
+/// Scale particle sizes across all frames by a multiplier.
+pub fn edit_scale_size(frames: &mut [Vec<Particle>], factor: f32) {
+    for frame in frames.iter_mut() {
+        for p in frame.iter_mut() {
+            p.size *= factor;
+        }
+    }
+}
+
+/// Set all particle sizes to a uniform value across all frames.
+pub fn edit_uniform_size(frames: &mut [Vec<Particle>], size: f32) {
+    for frame in frames.iter_mut() {
+        for p in frame.iter_mut() {
+            p.size = size;
+        }
+    }
+}
+
+/// Adjust brightness (RGB) and opacity (Alpha) of all particles.
+pub fn edit_adjust_color(frames: &mut [Vec<Particle>], brightness: f32, opacity: f32) {
+    for frame in frames.iter_mut() {
+        for p in frame.iter_mut() {
+            p.color[0] = (p.color[0] as f32 * brightness).round().clamp(0.0, 255.0) as u8;
+            p.color[1] = (p.color[1] as f32 * brightness).round().clamp(0.0, 255.0) as u8;
+            p.color[2] = (p.color[2] as f32 * brightness).round().clamp(0.0, 255.0) as u8;
+            p.color[3] = (p.color[3] as f32 * opacity).round().clamp(0.0, 255.0) as u8;
+        }
+    }
+}
+
+/// Translate all particle positions by an offset.
+pub fn edit_translate(frames: &mut [Vec<Particle>], offset: [f32; 3]) {
+    for frame in frames.iter_mut() {
+        for p in frame.iter_mut() {
+            p.pos[0] += offset[0];
+            p.pos[1] += offset[1];
+            p.pos[2] += offset[2];
+        }
+    }
+}
+
+/// Scale all particle positions by a factor (relative to origin).
+pub fn edit_scale_position(frames: &mut [Vec<Particle>], scale: f32) {
+    for frame in frames.iter_mut() {
+        for p in frame.iter_mut() {
+            p.pos[0] *= scale;
+            p.pos[1] *= scale;
+            p.pos[2] *= scale;
+        }
+    }
+}
+
+/// Recalculate the AABB bounding box from frame data.
+pub fn recalculate_bbox(frames: &[Vec<Particle>]) -> ([f32; 3], [f32; 3]) {
+    let mut bbox_min = [f32::MAX; 3];
+    let mut bbox_max = [f32::MIN; 3];
+    for frame in frames {
+        for p in frame {
+            for i in 0..3 {
+                bbox_min[i] = bbox_min[i].min(p.pos[i]);
+                bbox_max[i] = bbox_max[i].max(p.pos[i]);
+            }
+        }
+    }
+    if bbox_min[0] == f32::MAX {
+        bbox_min = [0.0; 3];
+        bbox_max = [0.0; 3];
+    }
+    (bbox_min, bbox_max)
+}
+
+/// Trim frames to a sub-range [start, end] (inclusive).
+pub fn edit_trim_frames(frames: &[Vec<Particle>], start: usize, end: usize) -> Vec<Vec<Particle>> {
+    let end = end.min(frames.len().saturating_sub(1));
+    let start = start.min(end);
+    frames[start..=end].to_vec()
 }
