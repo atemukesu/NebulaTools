@@ -1,38 +1,32 @@
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Language {
-    ChineseSimplified,
-    English,
-}
-
-impl Language {
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Language::ChineseSimplified => "简体中文",
-            Language::English => "English",
-        }
-    }
-
-    pub fn config_key(&self) -> &'static str {
-        match self {
-            Language::ChineseSimplified => "zh",
-            Language::English => "en",
-        }
-    }
-}
+/// A static mapping of ISO language codes to their native display names.
+const NATIVE_NAMES: &[(&str, &str)] = &[
+    ("en_US", "English (US)"),
+    ("zh_CN", "简体中文"),
+    ("ja_JP", "日本語"),
+    ("zh_TW", "繁體中文"),
+    ("ko_KR", "한국어"),
+    ("fr_FR", "Français"),
+    ("de_DE", "Deutsch"),
+    ("es_ES", "Español"),
+    ("ru_RU", "Русский"),
+];
 
 pub struct I18nManager {
-    pub active_lang: Language,
-    // 使用 Box::leak 后的静态映射，确保 tr 返回 &'static str
+    pub active_lang: String,
+    pub available_langs: Vec<String>,
+    // Map: lang_id -> (key -> value)
     translations: HashMap<&'static str, HashMap<&'static str, &'static str>>,
 }
 
 impl I18nManager {
-    pub fn new(lang: Language) -> Self {
+    pub fn new(lang_id: String) -> Self {
         let mut manager = Self {
-            active_lang: lang,
+            active_lang: lang_id,
+            available_langs: Vec::new(),
             translations: HashMap::new(),
         };
         manager.load_all();
@@ -40,20 +34,48 @@ impl I18nManager {
     }
 
     fn load_all(&mut self) {
-        let zh_json = include_str!("../assets/lang_zh.json");
-        let en_json = include_str!("../assets/lang_en.json");
+        let lang_dir = Path::new("assets/lang");
+        if !lang_dir.exists() {
+            // Fallback if directory missing
+            return;
+        }
 
-        self.translations
-            .insert("zh", Self::parse_and_leak(zh_json));
-        self.translations
-            .insert("en", Self::parse_and_leak(en_json));
+        if let Ok(entries) = fs::read_dir(lang_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|s| s.to_str()) == Some("json") {
+                    if let Some(lang_id) = path.file_stem().and_then(|s| s.to_str()) {
+                        if let Ok(content) = fs::read_to_string(&path) {
+                            let lang_id_static: &'static str =
+                                Box::leak(lang_id.to_string().into_boxed_str());
+                            self.translations
+                                .insert(lang_id_static, Self::parse_and_leak(&content));
+                            self.available_langs.push(lang_id.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        // Sort languages to keep order consistent
+        self.available_langs.sort();
+
+        // Ensure active_lang is valid, if not, fallback to "en_US" or first available
+        if !self.available_langs.contains(&self.active_lang) {
+            if self.available_langs.contains(&"en_US".to_string()) {
+                self.active_lang = "en_US".into();
+            } else if let Some(first) = self.available_langs.first() {
+                self.active_lang = first.clone();
+            } else {
+                self.active_lang = "en_US".into();
+            }
+        }
     }
 
     fn parse_and_leak(json: &str) -> HashMap<&'static str, &'static str> {
         let raw: HashMap<String, String> = serde_json::from_str(json).unwrap_or_default();
         let mut leaked = HashMap::new();
         for (k, v) in raw {
-            // 将读取到的字符串永久保留在内存中，换取 &'static 生命周期
             let k_static: &'static str = Box::leak(k.into_boxed_str());
             let v_static: &'static str = Box::leak(v.into_boxed_str());
             leaked.insert(k_static, v_static);
@@ -61,16 +83,33 @@ impl I18nManager {
         leaked
     }
 
-    /// 现在返回的是 &'static str，不再与 self 绑定，解决了所有的 Borrow Checker 问题
+    /// Translates a key based on active language.
     pub fn tr(&self, key: &str) -> &'static str {
-        let lang_key = self.active_lang.config_key();
-        if let Some(map) = self.translations.get(lang_key) {
+        if let Some(map) = self.translations.get(self.active_lang.as_str()) {
             if let Some(val) = map.get(key) {
                 return val;
             }
         }
-        // 如果找不到翻译，为了维持 &'static，我们需要泄漏一下这个 key 或返回预定义的静态字符串
-        // 考虑到 key 通常是字面量，这在实际场景中几乎不会发生
+        // Fallback to "en_US" if current lang doesn't have the key
+        if self.active_lang != "en_US" {
+            if let Some(en_map) = self.translations.get("en_US") {
+                if let Some(val) = en_map.get(key) {
+                    return val;
+                }
+            }
+        }
+        // Final fallback: return the key itself leaked to static
         Box::leak(key.to_string().into_boxed_str())
+    }
+
+    /// Gets the native name of a language ID from the master table.
+    pub fn get_lang_name(&self, lang_id: &str) -> &'static str {
+        for (code, native_name) in NATIVE_NAMES {
+            if *code == lang_id {
+                return native_name;
+            }
+        }
+        // Fallback to ID itself if not in table
+        Box::leak(lang_id.to_string().into_boxed_str())
     }
 }

@@ -1,5 +1,5 @@
 use crate::editor::EmitterConfig;
-use crate::i18n::{I18nManager, Language};
+use crate::i18n::I18nManager;
 use crate::player::{NblHeader, Particle, PlayerState};
 use crate::renderer::ParticleRenderer;
 use eframe::{
@@ -20,13 +20,13 @@ pub enum AppMode {
 
 #[derive(Serialize, Deserialize)]
 pub struct AppConfig {
-    pub lang: Language,
+    pub lang: String,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            lang: Language::ChineseSimplified,
+            lang: "en_US".into(),
         }
     }
 }
@@ -211,7 +211,7 @@ impl NebulaToolsApp {
             Err(_) => AppConfig::default(),
         };
 
-        let i18n = I18nManager::new(config.lang);
+        let i18n = I18nManager::new(config.lang.clone());
 
         Self {
             player: PlayerState::default(),
@@ -238,9 +238,9 @@ impl NebulaToolsApp {
         }
     }
 
-    pub fn update_lang(&mut self, lang: Language) {
-        self.config.lang = lang;
-        self.i18n.active_lang = lang;
+    pub fn update_lang(&mut self, lang_id: String) {
+        self.config.lang = lang_id.clone();
+        self.i18n.active_lang = lang_id;
         self.save_config();
     }
 
@@ -446,26 +446,17 @@ impl eframe::App for NebulaToolsApp {
                 });
 
                 egui::ComboBox::from_id_source("top_lang_combo")
-                    .selected_text(self.config.lang.display_name())
+                    .selected_text(self.i18n.get_lang_name(&self.config.lang))
                     .show_ui(ui, |ui| {
-                        let current_lang = self.config.lang;
-                        if ui
-                            .selectable_label(
-                                current_lang == Language::ChineseSimplified,
-                                Language::ChineseSimplified.display_name(),
-                            )
-                            .clicked()
-                        {
-                            self.update_lang(Language::ChineseSimplified);
-                        }
-                        if ui
-                            .selectable_label(
-                                current_lang == Language::English,
-                                Language::English.display_name(),
-                            )
-                            .clicked()
-                        {
-                            self.update_lang(Language::English);
+                        let available = self.i18n.available_langs.clone();
+                        for lang_id in available {
+                            let name = self.i18n.get_lang_name(&lang_id);
+                            if ui
+                                .selectable_label(self.config.lang == lang_id, name)
+                                .clicked()
+                            {
+                                self.update_lang(lang_id);
+                            }
                         }
                     });
 

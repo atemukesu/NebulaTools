@@ -1,5 +1,4 @@
 use super::app::{AppMode, NebulaToolsApp};
-use crate::i18n::Language;
 use eframe::egui;
 
 impl NebulaToolsApp {
@@ -7,26 +6,17 @@ impl NebulaToolsApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.with_layout(egui::Layout::top_down(egui::Align::RIGHT), |ui| {
                 egui::ComboBox::from_id_source("welcome_lang")
-                    .selected_text(self.config.lang.display_name())
+                    .selected_text(self.i18n.get_lang_name(&self.config.lang))
                     .show_ui(ui, |ui| {
-                        let current_lang = self.config.lang;
-                        if ui
-                            .selectable_label(
-                                current_lang == Language::ChineseSimplified,
-                                Language::ChineseSimplified.display_name(),
-                            )
-                            .clicked()
-                        {
-                            self.update_lang(Language::ChineseSimplified);
-                        }
-                        if ui
-                            .selectable_label(
-                                current_lang == Language::English,
-                                Language::English.display_name(),
-                            )
-                            .clicked()
-                        {
-                            self.update_lang(Language::English);
+                        let available = self.i18n.available_langs.clone();
+                        for lang_id in available {
+                            let name = self.i18n.get_lang_name(&lang_id);
+                            if ui
+                                .selectable_label(self.config.lang == lang_id, name)
+                                .clicked()
+                            {
+                                self.update_lang(lang_id);
+                            }
                         }
                     });
             });
