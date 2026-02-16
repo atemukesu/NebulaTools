@@ -1468,47 +1468,134 @@ fn tracks_to_frames(tracks: &[Track]) -> Vec<Vec<Particle>> {
 
 /// Compile particleex commands text into frame snapshots.
 /// Returns (frames, target_fps).
+#[allow(dead_code)]
 pub fn compile(commands_text: &str) -> Result<(Vec<Vec<Particle>>, u16), String> {
-    let lines: Vec<&str> = commands_text
-        .lines()
-        .map(|l| l.trim())
-        .filter(|l| !l.is_empty())
-        .collect();
+    let entries = vec![CompileEntry {
+        command: commands_text.to_string(),
+        start_tick: 0.0,
+        position: [0.0; 3],
+        duration_override: 0.0,
+    }];
+    compile_entries(&entries)
+}
 
+/// A single compilable entry with optional overrides.
+pub struct CompileEntry {
+    pub command: String,
+    pub start_tick: f64,
+    pub position: [f64; 3],
+    pub duration_override: f64, // 0 = use command's own value
+}
+
+/// Compile multiple entries into merged frame snapshots.
+/// Each entry can have its own start time, position, and duration override.
+/// Returns (frames, target_fps).
+pub fn compile_entries(entries: &[CompileEntry]) -> Result<(Vec<Vec<Particle>>, u16), String> {
     let mut all_tracks: Vec<Track> = Vec::new();
     let mut p_id: i32 = 0;
     let mut errors = Vec::new();
 
-    for line in &lines {
-        let lower = line.to_lowercase();
-        if !lower.starts_with("particleex")
-            && !lower.starts_with("/particleex")
-            && !lower.starts_with("particlex")
-            && !lower.starts_with("/particlex")
-        {
-            continue;
-        }
-        match parse_command(line) {
-            Some(cmd) => {
-                let (tracks, next_id) = generate_tracks(&cmd, p_id);
-                p_id = next_id;
-                all_tracks.extend(tracks);
+    for entry in entries {
+        let lines: Vec<&str> = entry
+            .command
+            .lines()
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty())
+            .collect();
+
+        for line in &lines {
+            let lower = line.to_lowercase();
+            if !lower.starts_with("particleex")
+                && !lower.starts_with("/particleex")
+                && !lower.starts_with("particlex")
+                && !lower.starts_with("/particlex")
+            {
+                continue;
             }
-            None => {
-                errors.push(format!("Failed to parse: {}", line));
+            match parse_command(line) {
+                Some(mut cmd) => {
+                    // Apply position override
+                    if entry.position != [0.0; 3] {
+                        cmd.center = entry.position;
+                    }
+                    // Apply duration override
+                    if entry.duration_override > 0.0 {
+                        cmd.lifespan = entry.duration_override as u32;
+                    }
+
+                    let (mut tracks, next_id) = generate_tracks(&cmd, p_id);
+
+                    // Apply start tick offset
+                    let offset = (entry.start_tick * TIME_SCALE).floor() as u32;
+                    if offset > 0 {
+                        for track in &mut tracks {
+                            for kf in &mut track.keyframes {
+                                kf.tick += offset;
+                            }
+                        }
+                    }
+
+                    p_id = next_id;
+                    all_tracks.extend(tracks);
+                }
+                None => {
+                    errors.push(format!("Failed to parse: {}", line));
+                }
             }
         }
     }
 
     if all_tracks.is_empty() {
         return Err(if errors.is_empty() {
-            "No particles generated from commands".into()
+            "No particles generated".into()
         } else {
             errors.join("\n")
         });
     }
 
     let frames = tracks_to_frames(&all_tracks);
-    // Default 60 FPS matching the JS implementation
     Ok((frames, 60))
+}
+
+/// Validate a command line. Returns Ok(description) or Err(error message).
+pub fn validate_command(line: &str) -> Result<String, String> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return Err("Empty command".into());
+    }
+    let lower = trimmed.to_lowercase();
+    if !lower.starts_with("particleex")
+        && !lower.starts_with("/particleex")
+        && !lower.starts_with("particlex")
+        && !lower.starts_with("/particlex")
+    {
+        return Err("Command must start with particleex or particlex".into());
+    }
+    match parse_command(trimmed) {
+        Some(cmd) => {
+            let mode = &cmd.type_name;
+            let lifespan = cmd.lifespan;
+            let info = if cmd.config.is_normal {
+                format!("✅ {} | count={} lifespan={}", mode, cmd.count, lifespan)
+            } else if cmd.config.is_conditional {
+                format!(
+                    "✅ {} | range={:.1}×{:.1}×{:.1} lifespan={}",
+                    mode,
+                    cmd.range[0] * 2.0,
+                    cmd.range[1] * 2.0,
+                    cmd.range[2] * 2.0,
+                    lifespan
+                )
+            } else {
+                let total =
+                    ((cmd.t_end - cmd.t_begin) / cmd.t_step.abs().max(0.0001)).floor() as u32 + 1;
+                format!(
+                    "✅ {} | t=[{:.1}..{:.1}] particles≈{} lifespan={}",
+                    mode, cmd.t_begin, cmd.t_end, total, lifespan
+                )
+            };
+            Ok(info)
+        }
+        None => Err("❌ Failed to parse command arguments".into()),
+    }
 }

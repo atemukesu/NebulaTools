@@ -1,11 +1,11 @@
-use super::app::NebulaToolsApp;
-use crate::particleex;
+use super::app::{NebulaToolsApp, PexCommandEntry};
+use crate::particleex::{self, CompileEntry};
 use crate::player::{self, NblHeader, TextureEntry};
 use eframe::egui;
 
 impl NebulaToolsApp {
     pub(crate) fn show_particleex_workflow(&mut self, ctx: &egui::Context) {
-        // Playback logic for particleex preview
+        // Playback logic
         if self.pex.preview_playing {
             if let Some(ref frames) = self.pex.preview_frames {
                 let dt = ctx.input(|i| i.stable_dt);
@@ -17,75 +17,225 @@ impl NebulaToolsApp {
                     if (next as usize) < frames.len() {
                         self.pex.preview_frame_idx = next;
                     } else {
-                        self.pex.preview_frame_idx = 0; // loop
+                        self.pex.preview_frame_idx = 0;
                     }
                 }
                 ctx.request_repaint();
             }
         }
 
+        // ─── Fullscreen editor overlay ───
+        if let Some(fs_idx) = self.pex.fullscreen_entry {
+            if fs_idx < self.pex.entries.len() {
+                let mut close = false;
+                egui::Area::new(egui::Id::new("pex_fullscreen"))
+                    .fixed_pos(egui::pos2(0.0, 0.0))
+                    .order(egui::Order::Foreground)
+                    .show(ctx, |ui| {
+                        let screen = ctx.screen_rect();
+                        ui.allocate_exact_size(screen.size(), egui::Sense::hover());
+
+                        let panel_rect = screen.shrink(40.0);
+                        ui.painter()
+                            .rect_filled(screen, 0.0, egui::Color32::from_black_alpha(200));
+                        ui.painter()
+                            .rect_filled(panel_rect, 12.0, egui::Color32::from_gray(30));
+
+                        ui.allocate_ui_at_rect(panel_rect.shrink(16.0), |ui| {
+                            ui.horizontal(|ui| {
+                                ui.heading(format!("#{} Command Editor", fs_idx + 1));
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if ui.button("✕ Close").clicked() {
+                                            close = true;
+                                        }
+                                    },
+                                );
+                            });
+                            ui.separator();
+                            ui.add_space(8.0);
+
+                            // Syntax hint
+                            let cmd_text = &self.pex.entries[fs_idx].command;
+                            if !cmd_text.trim().is_empty() {
+                                let hint = particleex::validate_command(cmd_text);
+                                match hint {
+                                    Ok(info) => ui
+                                        .colored_label(egui::Color32::from_rgb(80, 200, 80), &info),
+                                    Err(err) => ui.colored_label(
+                                        egui::Color32::from_rgb(255, 100, 100),
+                                        &err,
+                                    ),
+                                };
+                                ui.add_space(4.0);
+                            }
+
+                            let avail = ui.available_size();
+                            let text_edit =
+                                egui::TextEdit::multiline(&mut self.pex.entries[fs_idx].command)
+                                    .desired_width(avail.x)
+                                    .desired_rows(((avail.y - 30.0) / 16.0).max(10.0) as usize)
+                                    .code_editor()
+                                    .hint_text("particleex parameter ...");
+                            ui.add(text_edit);
+                        });
+                    });
+                if close {
+                    self.pex.fullscreen_entry = None;
+                }
+                return; // Don't render anything else while fullscreen
+            } else {
+                self.pex.fullscreen_entry = None;
+            }
+        }
+
+        // ─── Side Panel: Command Entries ───
         egui::SidePanel::left("particleex_side")
             .resizable(true)
-            .default_width(400.0)
+            .default_width(420.0)
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     ui.add_space(8.0);
-                    ui.heading(self.i18n.tr("particleex_title"));
+                    ui.horizontal(|ui| {
+                        ui.heading(self.i18n.tr("particleex_title"));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("❓").on_hover_text(self.i18n.tr("particleex_hint")).clicked() {
+                                self.pex.show_help = !self.pex.show_help;
+                            }
+                        });
+                    });
                     ui.separator();
 
-                    ui.label(
-                        egui::RichText::new(self.i18n.tr("particleex_input"))
-                            .strong()
-                            .size(15.0),
-                    );
-                    ui.add_space(4.0);
+                    // Help panel
+                    if self.pex.show_help {
+                        ui.add_space(4.0);
+                        egui::Frame::none()
+                            .fill(egui::Color32::from_gray(25))
+                            .inner_margin(8.0)
+                            .rounding(6.0)
+                            .show(ui, |ui| {
+                                ui.label(egui::RichText::new("📖 Syntax Reference").strong().size(14.0));
+                                ui.add_space(4.0);
+                                ui.label("Commands: normal, conditional, parameter, polar-parameter,\nrgba-parameter, tick-parameter, rgba-tick-polar-parameter ...");
+                                ui.add_space(4.0);
+                                ui.label("Variables: x y z vx vy vz cr cg cb alpha mpsize age t s1 s2 dis destory");
+                                ui.add_space(4.0);
+                                ui.label("Functions: sin cos tan asin acos atan atan2 pow sqrt exp log\nfloor ceil round abs min max random lerp clamp ...");
+                                ui.add_space(4.0);
+                                ui.label("Example:\nparticleex parameter end_rod ~ ~ ~ 1 1 1 1 0 0 0 -10 10 'x=t;y=sin(t)' 0.1 200");
+                            });
+                        ui.separator();
+                    }
 
-                    ui.label(
-                        egui::RichText::new(self.i18n.tr("particleex_hint"))
-                            .weak()
-                            .italics(),
-                    );
-                    ui.add_space(4.0);
+                    // ─── Entry list ───
+                    let entry_count = self.pex.entries.len();
+                    let mut remove_idx: Option<usize> = None;
 
-                    // Command text area
-                    let text_edit = egui::TextEdit::multiline(&mut self.pex.commands_text)
-                        .desired_width(f32::INFINITY)
-                        .desired_rows(16)
-                        .code_editor()
-                        .hint_text("particleex parameter ...");
-                    ui.add(text_edit);
+                    for i in 0..entry_count {
+                        ui.add_space(8.0);
+                        let entry_id = format!("pex_entry_{}", i);
+                        egui::Frame::none()
+                            .fill(egui::Color32::from_gray(20))
+                            .inner_margin(10.0)
+                            .rounding(8.0)
+                            .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(50)))
+                            .show(ui, |ui| {
+                                // Header row
+                                ui.horizontal(|ui| {
+                                    ui.checkbox(&mut self.pex.entries[i].enabled, "");
+                                    ui.label(egui::RichText::new(format!("#{}", i + 1)).strong().size(14.0));
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        if entry_count > 1 {
+                                            if ui.small_button("🗑").on_hover_text("Remove").clicked() {
+                                                remove_idx = Some(i);
+                                            }
+                                        }
+                                        if ui.small_button("⛶").on_hover_text("Fullscreen").clicked() {
+                                            self.pex.fullscreen_entry = Some(i);
+                                        }
+                                    });
+                                });
+
+                                ui.add_space(4.0);
+
+                                // Command text
+                                let text_edit = egui::TextEdit::multiline(&mut self.pex.entries[i].command)
+                                    .desired_width(f32::INFINITY)
+                                    .desired_rows(4)
+                                    .code_editor()
+                                    .hint_text("particleex ...");
+                                ui.add(text_edit);
+
+                                // Inline validation
+                                let cmd_text = &self.pex.entries[i].command;
+                                if !cmd_text.trim().is_empty() {
+                                    let hint = particleex::validate_command(cmd_text);
+                                    match hint {
+                                        Ok(info) => { ui.colored_label(egui::Color32::from_rgb(80, 200, 80), &info); }
+                                        Err(err) => { ui.colored_label(egui::Color32::from_rgb(255, 100, 100), &err); }
+                                    };
+                                }
+
+                                ui.add_space(6.0);
+
+                                // Timing & overrides
+                                egui::Grid::new(format!("{}_grid", entry_id))
+                                    .num_columns(2)
+                                    .spacing([8.0, 4.0])
+                                    .show(ui, |ui| {
+                                        ui.label(self.i18n.tr("pex_start_tick"));
+                                        ui.add(egui::DragValue::new(&mut self.pex.entries[i].start_tick)
+                                            .speed(1.0).clamp_range(0.0..=100000.0_f32).suffix(" tick"));
+                                        ui.end_row();
+
+                                        ui.label(self.i18n.tr("pex_position"));
+                                        ui.horizontal(|ui| {
+                                            ui.add(egui::DragValue::new(&mut self.pex.entries[i].position[0]).speed(0.1).prefix("X:"));
+                                            ui.add(egui::DragValue::new(&mut self.pex.entries[i].position[1]).speed(0.1).prefix("Y:"));
+                                            ui.add(egui::DragValue::new(&mut self.pex.entries[i].position[2]).speed(0.1).prefix("Z:"));
+                                        });
+                                        ui.end_row();
+
+                                        ui.label(self.i18n.tr("pex_duration"));
+                                        ui.add(egui::DragValue::new(&mut self.pex.entries[i].duration_override)
+                                            .speed(1.0).clamp_range(0.0..=100000.0_f32).suffix(" tick"));
+                                        ui.end_row();
+                                    });
+                            });
+                    }
+
+                    // Remove entry
+                    if let Some(idx) = remove_idx {
+                        self.pex.entries.remove(idx);
+                    }
+
+                    // Add button
+                    ui.add_space(12.0);
+                    if ui.add_sized(
+                        [ui.available_width(), 32.0],
+                        egui::Button::new(egui::RichText::new(format!("➕ {}", self.i18n.tr("pex_add_command"))).size(14.0)),
+                    ).clicked() {
+                        self.pex.entries.push(PexCommandEntry::default());
+                    }
 
                     ui.add_space(16.0);
                     ui.separator();
 
-                    // ===== Action Buttons =====
+                    // ─── Action Buttons ───
                     ui.add_space(8.0);
-                    if ui
-                        .add_sized(
-                            [ui.available_width(), 36.0],
-                            egui::Button::new(
-                                egui::RichText::new(self.i18n.tr("particleex_compile"))
-                                    .strong()
-                                    .size(16.0),
-                            ),
-                        )
-                        .clicked()
-                    {
+                    if ui.add_sized(
+                        [ui.available_width(), 36.0],
+                        egui::Button::new(egui::RichText::new(self.i18n.tr("particleex_compile")).strong().size(16.0)),
+                    ).clicked() {
                         self.compile_particleex();
                     }
 
                     ui.add_space(8.0);
-                    if ui
-                        .add_sized(
-                            [ui.available_width(), 36.0],
-                            egui::Button::new(
-                                egui::RichText::new(self.i18n.tr("export_nbl"))
-                                    .strong()
-                                    .size(16.0),
-                            ),
-                        )
-                        .clicked()
-                    {
+                    if ui.add_sized(
+                        [ui.available_width(), 36.0],
+                        egui::Button::new(egui::RichText::new(self.i18n.tr("export_nbl")).strong().size(16.0)),
+                    ).clicked() {
                         self.export_particleex_nbl();
                     }
 
@@ -104,16 +254,12 @@ impl NebulaToolsApp {
                     if let Some(ref frames) = self.pex.preview_frames {
                         ui.add_space(12.0);
                         ui.separator();
-                        ui.label(
-                            egui::RichText::new(self.i18n.tr("particleex_stats"))
-                                .strong()
-                                .size(15.0),
-                        );
+                        ui.label(egui::RichText::new(self.i18n.tr("particleex_stats")).strong().size(15.0));
                         ui.add_space(4.0);
 
                         let total_frames = frames.len();
                         let max_particles = frames.iter().map(|f| f.len()).max().unwrap_or(0);
-                        let total_particles: usize = frames.iter().map(|f| f.len()).sum();
+                        let duration_secs = total_frames as f64 / self.pex.preview_fps as f64;
 
                         egui::Grid::new("pex_stats_grid")
                             .num_columns(2)
@@ -127,19 +273,23 @@ impl NebulaToolsApp {
                                 ui.label(format!("{}", max_particles));
                                 ui.end_row();
 
-                                ui.label(self.i18n.tr("particleex_total_keyframes"));
-                                ui.label(format!("{}", total_particles));
+                                ui.label(self.i18n.tr("duration"));
+                                ui.label(format!("{:.2}s", duration_secs));
                                 ui.end_row();
 
                                 ui.label("FPS");
                                 ui.label(format!("{}", self.pex.preview_fps));
+                                ui.end_row();
+
+                                ui.label(self.i18n.tr("pex_entries_count"));
+                                ui.label(format!("{}", self.pex.entries.len()));
                                 ui.end_row();
                             });
                     }
                 });
             });
 
-        // --- Bottom Panel: Playback ---
+        // ─── Bottom Panel: Playback ───
         if self.pex.preview_frames.is_some() {
             egui::TopBottomPanel::bottom("pex_playback")
                 .resizable(false)
@@ -188,7 +338,7 @@ impl NebulaToolsApp {
                 });
         }
 
-        // --- Central Panel: 3D Preview ---
+        // ─── Central Panel: 3D Preview ───
         let particles_data = if let Some(ref frames) = self.pex.preview_frames {
             let idx = (self.pex.preview_frame_idx as usize).min(frames.len().saturating_sub(1));
             self.prepare_render_data_from(&frames[idx])
@@ -202,19 +352,42 @@ impl NebulaToolsApp {
     }
 
     fn compile_particleex(&mut self) {
-        let text = self.pex.commands_text.clone();
-        match particleex::compile(&text) {
+        let entries: Vec<CompileEntry> = self
+            .pex
+            .entries
+            .iter()
+            .filter(|e| e.enabled && !e.command.trim().is_empty())
+            .map(|e| CompileEntry {
+                command: e.command.clone(),
+                start_tick: e.start_tick as f64,
+                position: [
+                    e.position[0] as f64,
+                    e.position[1] as f64,
+                    e.position[2] as f64,
+                ],
+                duration_override: e.duration_override as f64,
+            })
+            .collect();
+
+        if entries.is_empty() {
+            self.pex.status_msg = Some("❌ No enabled commands".into());
+            return;
+        }
+
+        match particleex::compile_entries(&entries) {
             Ok((frames, fps)) => {
                 let frame_count = frames.len();
+                let duration = frame_count as f64 / fps as f64;
                 self.pex.preview_frames = Some(frames);
                 self.pex.preview_fps = fps;
                 self.pex.preview_frame_idx = 0;
                 self.pex.preview_playing = true;
                 self.pex.status_msg = Some(format!(
-                    "✅ {} {} {}",
+                    "✅ {} {} {} ({:.1}s)",
                     self.i18n.tr("particleex_compiled"),
                     frame_count,
-                    self.i18n.tr("frame")
+                    self.i18n.tr("frame"),
+                    duration,
                 ));
             }
             Err(e) => {
@@ -224,7 +397,6 @@ impl NebulaToolsApp {
     }
 
     pub(crate) fn export_particleex_nbl(&mut self) {
-        // Compile if not done
         if self.pex.preview_frames.is_none() {
             self.compile_particleex();
         }

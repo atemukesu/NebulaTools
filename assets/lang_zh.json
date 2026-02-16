@@ -113,10 +113,15 @@
     "particleex_btn": "Particleex",
     "particleex_title": "Particleex 命令编译器",
     "particleex_input": "命令输入",
-    "particleex_hint": "输入 particleex 命令（每行一条），支持 normal、parameter、polarparameter 等类型",
+    "particleex_hint": "输入 particleex 命令，支持 normal、conditional、parameter、polar-parameter、tick-parameter 等类型。\n表达式用引号包裹，语句用 ; 分隔。\n变量：x y z vx vy vz cr cg cb alpha mpsize age t s1 s2 dis destory",
     "particleex_compile": "▶ 编译并预览",
     "particleex_compiled": "编译成功，共",
     "particleex_stats": "📊 统计信息",
     "particleex_max_particles": "最大粒子数",
-    "particleex_total_keyframes": "总关键帧数"
+    "particleex_total_keyframes": "总关键帧数",
+    "pex_start_tick": "起始时间",
+    "pex_position": "位置偏移",
+    "pex_duration": "时长覆盖",
+    "pex_add_command": "添加命令",
+    "pex_entries_count": "命令条数"
 }

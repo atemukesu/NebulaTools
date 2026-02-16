@@ -123,26 +123,50 @@ impl Default for CreatorState {
     }
 }
 
+pub struct PexCommandEntry {
+    pub command: String,
+    pub start_tick: f32,
+    pub position: [f32; 3],
+    pub duration_override: f32, // 0 = use command's own lifespan
+    pub enabled: bool,
+}
+
+impl Default for PexCommandEntry {
+    fn default() -> Self {
+        Self {
+            command: String::new(),
+            start_tick: 0.0,
+            position: [0.0, 0.0, 0.0],
+            duration_override: 0.0,
+            enabled: true,
+        }
+    }
+}
+
 pub struct ParticleexState {
-    pub commands_text: String,
+    pub entries: Vec<PexCommandEntry>,
     pub preview_frames: Option<Vec<Vec<Particle>>>,
     pub preview_playing: bool,
     pub preview_frame_idx: i32,
     pub preview_timer: f32,
     pub preview_fps: u16,
     pub status_msg: Option<String>,
+    pub show_help: bool,
+    pub fullscreen_entry: Option<usize>,
 }
 
 impl Default for ParticleexState {
     fn default() -> Self {
         Self {
-            commands_text: String::new(),
+            entries: vec![PexCommandEntry::default()],
             preview_frames: None,
             preview_playing: false,
             preview_frame_idx: 0,
             preview_timer: 0.0,
             preview_fps: 60,
             status_msg: None,
+            show_help: false,
+            fullscreen_entry: None,
         }
     }
 }

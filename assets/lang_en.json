@@ -118,5 +118,10 @@
     "particleex_compiled": "Compiled successfully,",
     "particleex_stats": "📊 Statistics",
     "particleex_max_particles": "Max Particles",
-    "particleex_total_keyframes": "Total Keyframes"
+    "particleex_total_keyframes": "Total Keyframes",
+    "pex_start_tick": "Start Time",
+    "pex_position": "Position",
+    "pex_duration": "Duration Override",
+    "pex_add_command": "Add Command",
+    "pex_entries_count": "Entries"
 }
