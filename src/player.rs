@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{Cursor, Read, Seek, SeekFrom, Write};
+use std::io::{BufWriter, Cursor, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -768,65 +768,138 @@ pub fn streaming_compress(
     zstd_level: i32,
     progress: Arc<Mutex<CompressProgress>>,
 ) -> Result<()> {
-    // 1. Open source file and read metadata
+    // 1. Initial load for metadata
     let mut player = PlayerState::default();
     player.load_file(source_path)?;
-
     let header = player.header.as_ref().ok_or(anyhow!("No header"))?.clone();
     let textures = player.textures.clone();
     let total_frames = header.total_frames;
 
-    // Reset state for sequential processing
+    let file = File::create(&output_path)?;
+    let mut writer = BufWriter::new(file);
+
+    // ==========================================
+    // Step A: Calculate reserved space
+    // ==========================================
+    let mut tex_block_size: usize = 0;
+    for tex in &textures {
+        tex_block_size += 2 + tex.path.as_bytes().len() + 1 + 1;
+    }
+
+    // Frame Index Table: TotalFrames * 12 bytes
+    let frame_index_table_size = total_frames as usize * 12;
+
+    // Keyframe Index Table (Maximum Reservation): TotalFrames * 4 bytes + 4 (count)
+    let max_possible_keyframes = total_frames;
+    let keyframe_index_table_reserved_size = 4 + (max_possible_keyframes as usize) * 4;
+
+    // Start of data area
+    let data_start_offset =
+        48 + tex_block_size + frame_index_table_size + keyframe_index_table_reserved_size;
+
+    // ==========================================
+    // Step B: Write Header & Textures & Padding
+    // ==========================================
+
+    // Header (48 bytes)
+    writer.write_all(MAGIC)?;
+    writer.write_u16::<LittleEndian>(header.version)?;
+    writer.write_u16::<LittleEndian>(header.target_fps)?;
+    writer.write_u32::<LittleEndian>(total_frames)?;
+    writer.write_u16::<LittleEndian>(textures.len() as u16)?;
+    writer.write_u16::<LittleEndian>(header.attributes)?;
+    for v in &header.bbox_min {
+        writer.write_f32::<LittleEndian>(*v)?;
+    }
+    for v in &header.bbox_max {
+        writer.write_f32::<LittleEndian>(*v)?;
+    }
+    writer.write_all(&[0u8; 4])?;
+
+    // Texture block
+    for tex in &textures {
+        let path_bytes = tex.path.as_bytes();
+        writer.write_u16::<LittleEndian>(path_bytes.len() as u16)?;
+        writer.write_all(path_bytes)?;
+        writer.write_u8(tex.rows)?;
+        writer.write_u8(tex.cols)?;
+    }
+
+    // Padding with zeros until data_start_offset
+    let current_pos = writer.stream_position()?;
+    let padding_size = data_start_offset as u64 - current_pos;
+    let zeros = vec![0u8; 8192];
+    let mut remaining = padding_size;
+    while remaining > 0 {
+        let chunk = remaining.min(8192);
+        writer.write_all(&zeros[0..chunk as usize])?;
+        remaining -= chunk;
+    }
+
+    // ==========================================
+    // Step C: Stream Compression
+    // ==========================================
     player.particles.clear();
     player.current_frame_idx = -1;
-
-    let effective_interval = if keyframe_interval == 0 {
-        1
-    } else {
-        keyframe_interval
-    };
-    let mut keyframe_list: Vec<u32> = Vec::new();
-    let mut compressed_blobs: Vec<Vec<u8>> = Vec::with_capacity(total_frames as usize);
-
-    // 2. Process each frame one-at-a-time (streaming read)
-    // Double buffering to avoid cloning the heavy particle vector every frame
-    let mut current_snapshot: Vec<Particle> = Vec::new();
     let mut previous_snapshot: Vec<Particle> = Vec::new();
+    let mut current_snapshot: Vec<Particle> = Vec::new();
+
+    let mut index_entries: Vec<(u64, u32)> = Vec::with_capacity(total_frames as usize);
+    let mut real_keyframe_list: Vec<u32> = Vec::new();
+
+    let mut current_data_offset = data_start_offset as u64;
 
     for frame_idx in 0..total_frames {
         player.process_frame(frame_idx)?;
 
-        // Directly collect into current_snapshot, reusing capacity if possible
+        // Collect and sort particles for stable diffs
         current_snapshot.clear();
-        current_snapshot.reserve(player.particles.len());
-        // Note: HashMaps don't iterate in deterministic order unless we sort.
-        // NBL format usually relies on ID or order. Let's sort by ID to ensure stable diffs.
-        // If the original particle list was sorted, we should maintain that.
-        // PlayerState::process_frame updates a HashMap, so order is lost.
-        // We MUST sort by ID for P-Frame diffs to be minimal and correct!
-        let mut sorted_particles: Vec<&Particle> = player.particles.values().collect();
-        sorted_particles.sort_by_key(|p| p.id);
-
-        for p in sorted_particles {
-            current_snapshot.push(p.clone());
+        let mut sorted_ids: Vec<i32> = player.particles.keys().cloned().collect();
+        sorted_ids.sort_unstable();
+        for id in sorted_ids {
+            if let Some(p) = player.particles.get(&id) {
+                current_snapshot.push(p.clone());
+            }
         }
 
-        let is_keyframe = frame_idx % effective_interval == 0;
+        // Determine if this should be an I-Frame
+        let mut force_iframe = false;
+        let effective_interval = if keyframe_interval == 0 {
+            1
+        } else {
+            keyframe_interval
+        };
 
-        let raw = if is_keyframe || frame_idx == 0 {
-            keyframe_list.push(frame_idx);
+        if frame_idx == 0 || frame_idx % effective_interval == 0 {
+            force_iframe = true;
+        }
+
+        if !force_iframe {
+            // Dynamic I-Frame detection: check for velocity overflow
+            if check_velocity_overflow(&previous_snapshot, &current_snapshot) {
+                force_iframe = true;
+            }
+        }
+
+        let raw_packet = if force_iframe {
+            real_keyframe_list.push(frame_idx);
             encode_i_frame(&current_snapshot)
         } else {
             encode_p_frame(&previous_snapshot, &current_snapshot)
         };
 
-        let compressed = zstd::encode_all(Cursor::new(&raw), zstd_level)?;
-        compressed_blobs.push(compressed);
+        // ZSTD compression
+        let compressed = zstd::encode_all(Cursor::new(&raw_packet), zstd_level)?;
+        writer.write_all(&compressed)?;
 
-        // Swap buffers: current becomes previous for the next iteration
+        // Record index
+        index_entries.push((current_data_offset, compressed.len() as u32));
+        current_data_offset += compressed.len() as u64;
+
+        // Swap snapshots
         std::mem::swap(&mut previous_snapshot, &mut current_snapshot);
 
-        // Update progress every 10 frames to reduce lock contention
+        // Update progress
         if frame_idx % 10 == 0 || frame_idx == total_frames - 1 {
             if let Ok(mut p) = progress.lock() {
                 p.current_frame = frame_idx + 1;
@@ -834,72 +907,52 @@ pub fn streaming_compress(
         }
     }
 
-    // 3. Write output file
-    let mut f = File::create(&output_path)?;
+    writer.flush()?;
 
-    // Header (48 bytes)
-    f.write_all(MAGIC)?;
-    f.write_u16::<LittleEndian>(header.version)?;
-    f.write_u16::<LittleEndian>(header.target_fps)?;
-    f.write_u32::<LittleEndian>(total_frames)?;
-    f.write_u16::<LittleEndian>(textures.len() as u16)?;
-    f.write_u16::<LittleEndian>(header.attributes)?;
-    for v in &header.bbox_min {
-        f.write_f32::<LittleEndian>(*v)?;
-    }
-    for v in &header.bbox_max {
-        f.write_f32::<LittleEndian>(*v)?;
-    }
-    f.write_all(&[0u8; 4])?;
+    // ==========================================
+    // Step D: Patch Indices
+    // ==========================================
 
-    // Texture block
-    for tex in &textures {
-        let path_bytes = tex.path.as_bytes();
-        f.write_u16::<LittleEndian>(path_bytes.len() as u16)?;
-        f.write_all(path_bytes)?;
-        f.write_u8(tex.rows)?;
-        f.write_u8(tex.cols)?;
-    }
+    // Seek to Frame Index Table start
+    let frame_table_pos = 48 + tex_block_size;
+    writer.seek(SeekFrom::Start(frame_table_pos as u64))?;
 
-    // Calculate offsets
-    let mut tex_block_size: usize = 0;
-    for tex in &textures {
-        tex_block_size += 2 + tex.path.as_bytes().len() + 1 + 1;
-    }
-    let frame_index_table_size = total_frames as usize * 12;
-    let keyframe_count = keyframe_list.len();
-    let keyframe_index_table_size = 4 + keyframe_count * 4;
-    let data_start = 48 + tex_block_size + frame_index_table_size + keyframe_index_table_size;
-
-    let mut current_offset = data_start;
-    let mut index_entries: Vec<(u64, u32)> = Vec::with_capacity(total_frames as usize);
-    for blob in &compressed_blobs {
-        index_entries.push((current_offset as u64, blob.len() as u32));
-        current_offset += blob.len();
-    }
-
-    // Frame Index Table
     for (offset, size) in &index_entries {
-        f.write_u64::<LittleEndian>(*offset)?;
-        f.write_u32::<LittleEndian>(*size)?;
+        writer.write_u64::<LittleEndian>(*offset)?;
+        writer.write_u32::<LittleEndian>(*size)?;
     }
 
-    // Keyframe Index Table
-    f.write_u32::<LittleEndian>(keyframe_count as u32)?;
-    for &kf_idx in &keyframe_list {
-        f.write_u32::<LittleEndian>(kf_idx)?;
+    // Keyframe Index Table follows immediately
+    writer.write_u32::<LittleEndian>(real_keyframe_list.len() as u32)?;
+    for &kf_idx in &real_keyframe_list {
+        writer.write_u32::<LittleEndian>(kf_idx)?;
     }
 
-    // Frame data
-    for blob in &compressed_blobs {
-        f.write_all(blob)?;
-    }
-
-    f.flush()?;
+    writer.flush()?;
 
     if let Ok(mut p) = progress.lock() {
         p.is_done = true;
     }
 
     Ok(())
+}
+
+/// Helper function to detect if particle movement exceeds the P-Frame delta limit (int16 * 1000 = 32.767).
+/// If it does, we should force an I-Frame for this frame.
+fn check_velocity_overflow(prev: &[Particle], curr: &[Particle]) -> bool {
+    let prev_map: HashMap<i32, [f32; 3]> = prev.iter().map(|p| (p.id, p.pos)).collect();
+
+    for p in curr {
+        if let Some(old_pos) = prev_map.get(&p.id) {
+            let dx = (p.pos[0] - old_pos[0]).abs();
+            let dy = (p.pos[1] - old_pos[1]).abs();
+            let dz = (p.pos[2] - old_pos[2]).abs();
+
+            // Limit: 32.767
+            if dx > 32.76 || dy > 32.76 || dz > 32.76 {
+                return true;
+            }
+        }
+    }
+    false
 }
