@@ -853,10 +853,13 @@ impl NebulaToolsApp {
                     });
                 });
 
-                ui.add_sized(
-                    [ui.available_width(), 20.0],
-                    egui::ProgressBar::new(fraction).animate(false),
-                );
+                ui.scope(|ui| {
+                    ui.style_mut().visuals.extreme_bg_color = egui::Color32::from_gray(15);
+                    ui.add_sized(
+                        [ui.available_width(), 20.0],
+                        egui::ProgressBar::new(fraction).animate(false).fill(ACCENT),
+                    );
+                });
 
                 let elapsed = start_time.elapsed().as_secs_f32();
                 if current > 0 {
