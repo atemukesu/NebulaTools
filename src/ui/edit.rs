@@ -21,410 +21,111 @@ impl NebulaToolsApp {
             }
         }
 
+        // --- Side Panel: Tool Selection ---
         egui::SidePanel::left("edit_side")
-            .resizable(true)
-            .default_width(360.0)
+            .resizable(false)
+            .default_width(200.0)
             .show(ctx, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    ui.add_space(8.0);
-                    ui.heading(self.i18n.tr("edit_tools"));
-                    ui.separator();
+                ui.add_space(8.0);
+                ui.heading(self.i18n.tr("edit_tools"));
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(8.0);
 
-                    if self.player.header.is_none() {
-                        ui.add_space(20.0);
-                        ui.label(egui::RichText::new(self.i18n.tr("no_file_loaded")).italics());
-                        return;
+                let tools = [
+                    (crate::ui::app::EditTool::Speed, "edit_anim_speed"),
+                    (crate::ui::app::EditTool::Size, "edit_particle_size"),
+                    (crate::ui::app::EditTool::Color, "edit_color"),
+                    (crate::ui::app::EditTool::Transform, "edit_transform"),
+                    (crate::ui::app::EditTool::Trim, "edit_trim"),
+                ];
+
+                for (tool, lang_key) in tools {
+                    let is_selected = self.edit.selected_tool == tool;
+                    let text = self.i18n.tr(lang_key);
+
+                    let response = ui.selectable_label(is_selected, text);
+                    if response.clicked() {
+                        self.edit.selected_tool = tool;
                     }
+                    ui.add_space(4.0);
+                }
 
-                    // ===== 1. Animation Speed =====
-                    egui::CollapsingHeader::new(
-                        egui::RichText::new(self.i18n.tr("edit_anim_speed"))
-                            .strong()
-                            .size(15.0),
-                    )
-                    .default_open(false)
-                    .show(ui, |ui| {
-                        ui.label(egui::RichText::new(self.i18n.tr("edit_anim_speed_desc")).weak());
-                        ui.add_space(6.0);
-                        ui.radio_value(
-                            &mut self.edit.speed_mode,
-                            0,
-                            self.i18n.tr("speed_mode_fps_only"),
-                        );
-                        if self.edit.speed_mode == 0 {
-                            ui.indent("fps_only_indent", |ui| {
-                                ui.label(
-                                    egui::RichText::new(self.i18n.tr("speed_mode_fps_only_desc"))
-                                        .weak()
-                                        .small(),
-                                );
-                                ui.horizontal(|ui| {
-                                    ui.label(self.i18n.tr("new_fps"));
-                                    ui.add(
-                                        egui::DragValue::new(&mut self.edit.new_fps)
-                                            .clamp_range(1..=240)
-                                            .speed(1.0),
-                                    );
-                                });
-                            });
-                        }
-
-                        ui.add_space(4.0);
-                        ui.radio_value(
-                            &mut self.edit.speed_mode,
-                            1,
-                            self.i18n.tr("speed_mode_interp"),
-                        );
-                        if self.edit.speed_mode == 1 {
-                            ui.indent("interp_indent", |ui| {
-                                ui.label(
-                                    egui::RichText::new(self.i18n.tr("speed_mode_interp_desc"))
-                                        .weak()
-                                        .small(),
-                                );
-                                ui.horizontal(|ui| {
-                                    ui.label(self.i18n.tr("speed_factor"));
-                                    ui.add(
-                                        egui::DragValue::new(&mut self.edit.speed_factor)
-                                            .clamp_range(0.1..=10.0)
-                                            .speed(0.05)
-                                            .fixed_decimals(2),
-                                    );
-                                });
-                                if let Some(ref frames) = self.edit.decoded_frames {
-                                    let new_count = ((frames.len() as f32) / self.edit.speed_factor)
-                                        .round()
-                                        as usize;
-                                    ui.label(
-                                        egui::RichText::new(format!(
-                                            "  {} → {} {}",
-                                            frames.len(),
-                                            new_count,
-                                            self.i18n.tr("frame")
-                                        ))
-                                        .weak(),
-                                    );
-                                }
-                            });
-                        }
-
-                        ui.add_space(4.0);
-                        ui.radio_value(
-                            &mut self.edit.speed_mode,
-                            2,
-                            self.i18n.tr("speed_mode_both"),
-                        );
-                        if self.edit.speed_mode == 2 {
-                            ui.indent("both_indent", |ui| {
-                                ui.label(
-                                    egui::RichText::new(self.i18n.tr("speed_mode_both_desc"))
-                                        .weak()
-                                        .small(),
-                                );
-                                ui.horizontal(|ui| {
-                                    ui.label(self.i18n.tr("new_fps"));
-                                    ui.add(
-                                        egui::DragValue::new(&mut self.edit.new_fps)
-                                            .clamp_range(1..=240)
-                                            .speed(1.0),
-                                    );
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label(self.i18n.tr("speed_factor"));
-                                    ui.add(
-                                        egui::DragValue::new(&mut self.edit.speed_factor)
-                                            .clamp_range(0.1..=10.0)
-                                            .speed(0.05)
-                                            .fixed_decimals(2),
-                                    );
-                                });
-                            });
-                        }
-
-                        ui.add_space(6.0);
-                        if ui
-                            .button(
-                                egui::RichText::new(format!("▶ {}", self.i18n.tr("apply")))
-                                    .strong(),
-                            )
-                            .clicked()
-                        {
-                            self.apply_speed_edit();
-                        }
-                    });
-
-                    ui.add_space(6.0);
-
-                    // ===== 2. Particle Size =====
-                    egui::CollapsingHeader::new(
-                        egui::RichText::new(self.i18n.tr("edit_particle_size"))
-                            .strong()
-                            .size(15.0),
-                    )
-                    .default_open(false)
-                    .show(ui, |ui| {
-                        ui.label(
-                            egui::RichText::new(self.i18n.tr("edit_particle_size_desc")).weak(),
-                        );
-                        ui.add_space(6.0);
-                        ui.radio_value(
-                            &mut self.edit.size_mode,
-                            0,
-                            self.i18n.tr("size_mode_scale"),
-                        );
-                        if self.edit.size_mode == 0 {
-                            ui.indent("size_scale_indent", |ui| {
-                                ui.label(
-                                    egui::RichText::new(self.i18n.tr("size_mode_scale_desc"))
-                                        .weak()
-                                        .small(),
-                                );
-                                ui.horizontal(|ui| {
-                                    ui.label(self.i18n.tr("scale_factor"));
-                                    ui.add(
-                                        egui::DragValue::new(&mut self.edit.size_scale)
-                                            .clamp_range(0.01..=100.0)
-                                            .speed(0.05)
-                                            .fixed_decimals(2),
-                                    );
-                                });
-                            });
-                        }
-                        ui.add_space(4.0);
-                        ui.radio_value(
-                            &mut self.edit.size_mode,
-                            1,
-                            self.i18n.tr("size_mode_uniform"),
-                        );
-                        if self.edit.size_mode == 1 {
-                            ui.indent("size_uniform_indent", |ui| {
-                                ui.label(
-                                    egui::RichText::new(self.i18n.tr("size_mode_uniform_desc"))
-                                        .weak()
-                                        .small(),
-                                );
-                                ui.horizontal(|ui| {
-                                    ui.label(self.i18n.tr("uniform_size"));
-                                    ui.add(
-                                        egui::DragValue::new(&mut self.edit.size_uniform)
-                                            .clamp_range(0.0..=655.0)
-                                            .speed(0.01)
-                                            .fixed_decimals(2),
-                                    );
-                                });
-                            });
-                        }
-                        ui.add_space(6.0);
-                        if ui
-                            .button(
-                                egui::RichText::new(format!("▶ {}", self.i18n.tr("apply")))
-                                    .strong(),
-                            )
-                            .clicked()
-                        {
-                            self.apply_size_edit();
-                        }
-                    });
-
-                    ui.add_space(6.0);
-
-                    // ===== 3. Color Adjustment =====
-                    egui::CollapsingHeader::new(
-                        egui::RichText::new(self.i18n.tr("edit_color"))
-                            .strong()
-                            .size(15.0),
-                    )
-                    .default_open(false)
-                    .show(ui, |ui| {
-                        ui.label(egui::RichText::new(self.i18n.tr("edit_color_desc")).weak());
-                        ui.add_space(6.0);
-                        ui.horizontal(|ui| {
-                            ui.label(self.i18n.tr("brightness_factor"));
-                            ui.add(
-                                egui::DragValue::new(&mut self.edit.brightness)
-                                    .clamp_range(0.0..=5.0)
-                                    .speed(0.01)
-                                    .fixed_decimals(2),
-                            );
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label(self.i18n.tr("opacity_factor"));
-                            ui.add(
-                                egui::DragValue::new(&mut self.edit.opacity)
-                                    .clamp_range(0.0..=5.0)
-                                    .speed(0.01)
-                                    .fixed_decimals(2),
-                            );
-                        });
-                        ui.add_space(6.0);
-                        if ui
-                            .button(
-                                egui::RichText::new(format!("▶ {}", self.i18n.tr("apply")))
-                                    .strong(),
-                            )
-                            .clicked()
-                        {
-                            self.apply_color_edit();
-                        }
-                    });
-
-                    ui.add_space(6.0);
-
-                    // ===== 4. Position Transform =====
-                    egui::CollapsingHeader::new(
-                        egui::RichText::new(self.i18n.tr("edit_transform"))
-                            .strong()
-                            .size(15.0),
-                    )
-                    .default_open(false)
-                    .show(ui, |ui| {
-                        ui.label(egui::RichText::new(self.i18n.tr("edit_transform_desc")).weak());
-                        ui.add_space(6.0);
-                        ui.label(self.i18n.tr("translate_offset"));
-                        ui.horizontal(|ui| {
-                            ui.label("X:");
-                            ui.add(
-                                egui::DragValue::new(&mut self.edit.translate[0])
-                                    .speed(0.1)
-                                    .fixed_decimals(2),
-                            );
-                            ui.label("Y:");
-                            ui.add(
-                                egui::DragValue::new(&mut self.edit.translate[1])
-                                    .speed(0.1)
-                                    .fixed_decimals(2),
-                            );
-                            ui.label("Z:");
-                            ui.add(
-                                egui::DragValue::new(&mut self.edit.translate[2])
-                                    .speed(0.1)
-                                    .fixed_decimals(2),
-                            );
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label(self.i18n.tr("position_scale"));
-                            ui.add(
-                                egui::DragValue::new(&mut self.edit.pos_scale)
-                                    .clamp_range(0.01..=100.0)
-                                    .speed(0.01)
-                                    .fixed_decimals(2),
-                            );
-                        });
-                        ui.add_space(6.0);
-                        if ui
-                            .button(
-                                egui::RichText::new(format!("▶ {}", self.i18n.tr("apply")))
-                                    .strong(),
-                            )
-                            .clicked()
-                        {
-                            self.apply_transform_edit();
-                        }
-                    });
-
-                    ui.add_space(6.0);
-
-                    // ===== 5. Trim =====
-                    egui::CollapsingHeader::new(
-                        egui::RichText::new(self.i18n.tr("edit_trim"))
-                            .strong()
-                            .size(15.0),
-                    )
-                    .default_open(false)
-                    .show(ui, |ui| {
-                        ui.label(egui::RichText::new(self.i18n.tr("edit_trim_desc")).weak());
-                        ui.add_space(6.0);
-                        let max_frame = self
-                            .edit
-                            .decoded_frames
-                            .as_ref()
-                            .map(|f| f.len().saturating_sub(1) as u32)
-                            .unwrap_or(0);
-                        ui.horizontal(|ui| {
-                            ui.label(self.i18n.tr("trim_start"));
-                            ui.add(
-                                egui::DragValue::new(&mut self.edit.trim_start)
-                                    .clamp_range(0..=max_frame)
-                                    .speed(1.0),
-                            );
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label(self.i18n.tr("trim_end"));
-                            ui.add(
-                                egui::DragValue::new(&mut self.edit.trim_end)
-                                    .clamp_range(0..=max_frame)
-                                    .speed(1.0),
-                            );
-                        });
-                        if let Some(ref frames) = self.edit.decoded_frames {
-                            let start = self.edit.trim_start as usize;
-                            let end =
-                                (self.edit.trim_end as usize).min(frames.len().saturating_sub(1));
-                            if end >= start {
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "  → {} {}",
-                                        end - start + 1,
-                                        self.i18n.tr("frame")
-                                    ))
-                                    .weak(),
-                                );
-                            }
-                        }
-                        ui.add_space(6.0);
-                        if ui
-                            .button(
-                                egui::RichText::new(format!("▶ {}", self.i18n.tr("apply")))
-                                    .strong(),
-                            )
-                            .clicked()
-                        {
-                            self.apply_trim_edit();
-                        }
-                    });
-
-                    ui.add_space(20.0);
-                    ui.separator();
-
-                    // Save
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
                     ui.add_space(8.0);
                     if ui
                         .add_sized(
-                            [ui.available_width(), 36.0],
+                            [ui.available_width(), 32.0],
                             egui::Button::new(
-                                egui::RichText::new(self.i18n.tr("save_file"))
-                                    .strong()
-                                    .size(16.0),
+                                egui::RichText::new(self.i18n.tr("save_file")).strong(),
                             ),
                         )
                         .clicked()
                     {
                         self.save_edited_file();
                     }
-
-                    if let Some(ref msg) = self.edit.status_msg {
-                        ui.add_space(8.0);
-                        let color = if msg.starts_with('✅') {
-                            egui::Color32::from_rgb(80, 200, 80)
-                        } else {
-                            egui::Color32::from_rgb(255, 100, 100)
-                        };
-                        ui.colored_label(color, msg.as_str());
-                    }
+                    ui.add_space(8.0);
+                    ui.separator();
                 });
             });
 
-        // Central panel: summary
+        // --- Central Panel: Parameters & Summary ---
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.add_space(ui.available_height() * 0.25);
+            if self.player.header.is_none() {
+                ui.centered_and_justified(|ui| {
+                    ui.label(self.i18n.tr("no_file_loaded"));
+                });
+                return;
+            }
+
+            ui.vertical(|ui| {
+                // Header of the selected tool
+                let title = match self.edit.selected_tool {
+                    crate::ui::app::EditTool::Speed => self.i18n.tr("edit_anim_speed"),
+                    crate::ui::app::EditTool::Size => self.i18n.tr("edit_particle_size"),
+                    crate::ui::app::EditTool::Color => self.i18n.tr("edit_color"),
+                    crate::ui::app::EditTool::Transform => self.i18n.tr("edit_transform"),
+                    crate::ui::app::EditTool::Trim => self.i18n.tr("edit_trim"),
+                };
+                ui.heading(egui::RichText::new(title).size(24.0).strong());
+                ui.add_space(10.0);
+                ui.separator();
+                ui.add_space(10.0);
+
+                // Parameters view
+                egui::Frame::none()
+                    .fill(ui.visuals().faint_bg_color)
+                    .inner_margin(16.0)
+                    .rounding(8.0)
+                    .show(ui, |ui| match self.edit.selected_tool {
+                        crate::ui::app::EditTool::Speed => self.ui_speed_params(ui),
+                        crate::ui::app::EditTool::Size => self.ui_size_params(ui),
+                        crate::ui::app::EditTool::Color => self.ui_color_params(ui),
+                        crate::ui::app::EditTool::Transform => self.ui_transform_params(ui),
+                        crate::ui::app::EditTool::Trim => self.ui_trim_params(ui),
+                    });
+
+                ui.add_space(20.0);
+
+                // Status message
+                if let Some(ref msg) = self.edit.status_msg {
+                    let color = if msg.starts_with('✅') {
+                        egui::Color32::from_rgb(80, 200, 80)
+                    } else {
+                        egui::Color32::from_rgb(255, 100, 100)
+                    };
+                    ui.colored_label(color, msg);
+                    ui.add_space(10.0);
+                }
+
+                ui.separator();
+                ui.add_space(10.0);
+
+                // Summary stats
+                ui.heading(self.i18n.tr("metadata"));
+                ui.add_space(8.0);
+
                 if let Some(ref header) = self.edit.edited_header {
-                    ui.heading(
-                        egui::RichText::new(self.i18n.tr("edit_mode"))
-                            .size(28.0)
-                            .strong(),
-                    );
-                    ui.add_space(20.0);
                     let frame_count = self
                         .edit
                         .decoded_frames
@@ -436,26 +137,29 @@ impl NebulaToolsApp {
                     } else {
                         0.0
                     };
+
                     egui::Grid::new("edit_summary_grid")
                         .num_columns(2)
-                        .spacing([20.0, 8.0])
-                        .striped(true)
+                        .spacing([40.0, 10.0])
                         .show(ui, |ui| {
                             ui.label(self.i18n.tr("fps"));
                             ui.label(
                                 egui::RichText::new(format!("{}", header.target_fps)).strong(),
                             );
                             ui.end_row();
+
                             ui.label(self.i18n.tr("total_frames"));
                             ui.label(egui::RichText::new(format!("{}", frame_count)).strong());
                             ui.end_row();
+
                             ui.label(self.i18n.tr("duration"));
                             ui.label(egui::RichText::new(format!("{:.2} s", duration)).strong());
                             ui.end_row();
+
                             ui.label(self.i18n.tr("bbox"));
                             ui.label(
                                 egui::RichText::new(format!(
-                                    "({:.1},{:.1},{:.1}) → ({:.1},{:.1},{:.1})",
+                                    "({:.1},{:.1},{:.1}) -> ({:.1},{:.1},{:.1})",
                                     header.bbox_min[0],
                                     header.bbox_min[1],
                                     header.bbox_min[2],
@@ -467,11 +171,277 @@ impl NebulaToolsApp {
                             );
                             ui.end_row();
                         });
-                } else {
-                    ui.heading(self.i18n.tr("no_file_loaded"));
                 }
             });
         });
+    }
+
+    fn ui_speed_params(&mut self, ui: &mut egui::Ui) {
+        ui.label(egui::RichText::new(self.i18n.tr("edit_anim_speed_desc")).weak());
+        ui.add_space(12.0);
+
+        egui::Grid::new("speed_grid")
+            .num_columns(2)
+            .spacing([12.0, 8.0])
+            .show(ui, |ui| {
+                ui.radio_value(
+                    &mut self.edit.speed_mode,
+                    0,
+                    self.i18n.tr("speed_mode_fps_only"),
+                );
+                ui.vertical(|ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut self.edit.new_fps)
+                            .clamp_range(1..=240)
+                            .speed(1.0)
+                            .suffix(" FPS"),
+                    );
+                    ui.label(
+                        egui::RichText::new(self.i18n.tr("speed_mode_fps_only_desc"))
+                            .small()
+                            .weak(),
+                    );
+                });
+                ui.end_row();
+
+                ui.radio_value(
+                    &mut self.edit.speed_mode,
+                    1,
+                    self.i18n.tr("speed_mode_interp"),
+                );
+                ui.vertical(|ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut self.edit.speed_factor)
+                            .clamp_range(0.1..=10.0)
+                            .speed(0.05)
+                            .fixed_decimals(2)
+                            .prefix("x "),
+                    );
+                    ui.label(
+                        egui::RichText::new(self.i18n.tr("speed_mode_interp_desc"))
+                            .small()
+                            .weak(),
+                    );
+                    if let Some(ref frames) = self.edit.decoded_frames {
+                        let new_count =
+                            ((frames.len() as f32) / self.edit.speed_factor).round() as usize;
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "{} → {} {}",
+                                frames.len(),
+                                new_count,
+                                self.i18n.tr("frame")
+                            ))
+                            .small()
+                            .weak(),
+                        );
+                    }
+                });
+                ui.end_row();
+
+                ui.radio_value(
+                    &mut self.edit.speed_mode,
+                    2,
+                    self.i18n.tr("speed_mode_both"),
+                );
+                ui.vertical(|ui| {
+                    ui.label(
+                        egui::RichText::new(self.i18n.tr("speed_mode_both_desc"))
+                            .small()
+                            .weak(),
+                    );
+                });
+                ui.end_row();
+            });
+
+        ui.add_space(16.0);
+        if ui
+            .button(egui::RichText::new(format!("▶ {}", self.i18n.tr("apply"))).strong())
+            .clicked()
+        {
+            self.apply_speed_edit();
+        }
+    }
+
+    fn ui_size_params(&mut self, ui: &mut egui::Ui) {
+        ui.label(egui::RichText::new(self.i18n.tr("edit_particle_size_desc")).weak());
+        ui.add_space(12.0);
+
+        egui::Grid::new("size_grid")
+            .num_columns(2)
+            .spacing([12.0, 8.0])
+            .show(ui, |ui| {
+                ui.radio_value(&mut self.edit.size_mode, 0, self.i18n.tr("size_mode_scale"));
+                ui.vertical(|ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut self.edit.size_scale)
+                            .clamp_range(0.01..=100.0)
+                            .speed(0.05)
+                            .fixed_decimals(2),
+                    );
+                    ui.label(
+                        egui::RichText::new(self.i18n.tr("size_mode_scale_desc"))
+                            .small()
+                            .weak(),
+                    );
+                });
+                ui.end_row();
+
+                ui.radio_value(
+                    &mut self.edit.size_mode,
+                    1,
+                    self.i18n.tr("size_mode_uniform"),
+                );
+                ui.vertical(|ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut self.edit.size_uniform)
+                            .clamp_range(0.0..=655.0)
+                            .speed(0.01)
+                            .fixed_decimals(2),
+                    );
+                    ui.label(
+                        egui::RichText::new(self.i18n.tr("size_mode_uniform_desc"))
+                            .small()
+                            .weak(),
+                    );
+                });
+                ui.end_row();
+            });
+
+        ui.add_space(16.0);
+        if ui
+            .button(egui::RichText::new(format!("▶ {}", self.i18n.tr("apply"))).strong())
+            .clicked()
+        {
+            self.apply_size_edit();
+        }
+    }
+
+    fn ui_color_params(&mut self, ui: &mut egui::Ui) {
+        ui.label(egui::RichText::new(self.i18n.tr("edit_color_desc")).weak());
+        ui.add_space(12.0);
+
+        egui::Grid::new("color_grid")
+            .num_columns(2)
+            .spacing([12.0, 10.0])
+            .show(ui, |ui| {
+                ui.label(self.i18n.tr("brightness_factor"));
+                ui.add(
+                    egui::DragValue::new(&mut self.edit.brightness)
+                        .clamp_range(0.0..=5.0)
+                        .speed(0.01)
+                        .fixed_decimals(2),
+                );
+                ui.end_row();
+
+                ui.label(self.i18n.tr("opacity_factor"));
+                ui.add(
+                    egui::DragValue::new(&mut self.edit.opacity)
+                        .clamp_range(0.0..=5.0)
+                        .speed(0.01)
+                        .fixed_decimals(2),
+                );
+                ui.end_row();
+            });
+
+        ui.add_space(16.0);
+        if ui
+            .button(egui::RichText::new(format!("▶ {}", self.i18n.tr("apply"))).strong())
+            .clicked()
+        {
+            self.apply_color_edit();
+        }
+    }
+
+    fn ui_transform_params(&mut self, ui: &mut egui::Ui) {
+        ui.label(egui::RichText::new(self.i18n.tr("edit_transform_desc")).weak());
+        ui.add_space(12.0);
+
+        egui::Grid::new("transform_grid")
+            .num_columns(2)
+            .spacing([12.0, 10.0])
+            .show(ui, |ui| {
+                ui.label(self.i18n.tr("translate_offset"));
+                ui.horizontal(|ui| {
+                    ui.label("X:");
+                    ui.add(egui::DragValue::new(&mut self.edit.translate[0]).speed(0.1));
+                    ui.label("Y:");
+                    ui.add(egui::DragValue::new(&mut self.edit.translate[1]).speed(0.1));
+                    ui.label("Z:");
+                    ui.add(egui::DragValue::new(&mut self.edit.translate[2]).speed(0.1));
+                });
+                ui.end_row();
+
+                ui.label(self.i18n.tr("position_scale"));
+                ui.add(
+                    egui::DragValue::new(&mut self.edit.pos_scale)
+                        .clamp_range(0.01..=100.0)
+                        .speed(0.01)
+                        .fixed_decimals(2),
+                );
+                ui.end_row();
+            });
+
+        ui.add_space(16.0);
+        if ui
+            .button(egui::RichText::new(format!("▶ {}", self.i18n.tr("apply"))).strong())
+            .clicked()
+        {
+            self.apply_transform_edit();
+        }
+    }
+
+    fn ui_trim_params(&mut self, ui: &mut egui::Ui) {
+        ui.label(egui::RichText::new(self.i18n.tr("edit_trim_desc")).weak());
+        ui.add_space(12.0);
+
+        let max_frame = self
+            .edit
+            .decoded_frames
+            .as_ref()
+            .map(|f| f.len().saturating_sub(1) as u32)
+            .unwrap_or(0);
+
+        egui::Grid::new("trim_grid")
+            .num_columns(2)
+            .spacing([12.0, 10.0])
+            .show(ui, |ui| {
+                ui.label(self.i18n.tr("trim_start"));
+                ui.add(
+                    egui::DragValue::new(&mut self.edit.trim_start)
+                        .clamp_range(0..=max_frame)
+                        .speed(1.0),
+                );
+                ui.end_row();
+
+                ui.label(self.i18n.tr("trim_end"));
+                ui.add(
+                    egui::DragValue::new(&mut self.edit.trim_end)
+                        .clamp_range(0..=max_frame)
+                        .speed(1.0),
+                );
+                ui.end_row();
+            });
+
+        if let Some(ref frames) = self.edit.decoded_frames {
+            let start = self.edit.trim_start as usize;
+            let end = (self.edit.trim_end as usize).min(frames.len().saturating_sub(1));
+            if end >= start {
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new(format!("→ {} {}", end - start + 1, self.i18n.tr("frame")))
+                        .weak(),
+                );
+            }
+        }
+
+        ui.add_space(16.0);
+        if ui
+            .button(egui::RichText::new(format!("▶ {}", self.i18n.tr("apply"))).strong())
+            .clicked()
+        {
+            self.apply_trim_edit();
+        }
     }
 
     // ── Apply helpers ──

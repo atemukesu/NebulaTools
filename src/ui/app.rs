@@ -49,7 +49,17 @@ impl Default for CameraState {
     }
 }
 
+#[derive(PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
+pub enum EditTool {
+    Speed,
+    Size,
+    Color,
+    Transform,
+    Trim,
+}
+
 pub struct EditState {
+    pub selected_tool: EditTool,
     pub new_fps: u16,
     pub speed_factor: f32,
     pub speed_mode: u8,
@@ -70,6 +80,7 @@ pub struct EditState {
 impl Default for EditState {
     fn default() -> Self {
         Self {
+            selected_tool: EditTool::Speed,
             new_fps: 30,
             speed_factor: 1.0,
             speed_mode: 0,
