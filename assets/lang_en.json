@@ -113,7 +113,7 @@
     "particleex_btn": "Particleex",
     "particleex_title": "Particleex Command Compiler",
     "particleex_input": "Command Input",
-    "particleex_hint": "Enter particleex commands (one per line). Supports normal, parameter, polarparameter, etc.",
+    "particleex_hint": "Enter particleex commands. Supports normal, conditional, parameter, polar-parameter, tick-parameter, etc.\nExpressions are in single quotes, statements separated by ;\nVariables: x y z vx vy vz cr cg cb alpha mpsize age t s1 s2 dis destroy",
     "particleex_compile": "▶ Compile & Preview",
     "particleex_compiled": "Compiled successfully,",
     "particleex_stats": "📊 Statistics",
@@ -126,5 +126,14 @@
     "pex_entries_count": "Entries",
     "pex_confirm_delete_title": "Confirm Deletion",
     "pex_confirm_delete_msg": "Are you sure you want to delete this command?",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "pex_help_title": "📖 Particleex Syntax Reference",
+    "pex_help_commands": "Command Types",
+    "pex_help_commands_val": "normal: Basic spawning\nconditional: Spawning with conditional range\nparameter: Control movement with expressions (Recommended)\npolar-parameter: Control with polar coordinates\ntick-parameter: Parameters changing over time",
+    "pex_help_vars": "Variables (Used in 'expr')",
+    "pex_help_vars_val": "x, y, z: Position relative to center\nvx, vy, vz: Current velocity\ncr, cg, cb: Color (0-255)\nalpha: Transparency (0.0-1.0)\nmpsize: Particle size\nage, t: Lifetime in ticks\ndis: Accumulated distance\ndestroy: Set to 1 to remove particle",
+    "pex_help_math": "Math Functions",
+    "pex_help_math_val": "Basic: sin, cos, tan, pow, sqrt, abs, min, max, random, lerp, clamp\nAdvanced: floorDiv, floorMod, fma (Fused Multiply-Add), multiplyHigh, addExact, etc.",
+    "pex_help_example_title": "Example",
+    "pex_help_example_val": "particleex parameter end_rod ~ ~ ~ 1 1 1 1 0 0 0 -10 10 'vx=cos(t);vy=sin(t)' 0.1 200"
 }

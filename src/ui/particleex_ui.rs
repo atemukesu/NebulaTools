@@ -100,7 +100,11 @@ impl NebulaToolsApp {
                     ui.horizontal(|ui| {
                         ui.heading(self.i18n.tr("particleex_title"));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("❓").on_hover_text(self.i18n.tr("particleex_hint")).clicked() {
+                            if ui
+                                .button("❓")
+                                .on_hover_text(self.i18n.tr("particleex_hint"))
+                                .clicked()
+                            {
                                 self.pex.show_help = !self.pex.show_help;
                             }
                         });
@@ -115,15 +119,53 @@ impl NebulaToolsApp {
                             .inner_margin(8.0)
                             .rounding(6.0)
                             .show(ui, |ui| {
-                                ui.label(egui::RichText::new("📖 Syntax Reference").strong().size(14.0));
+                                ui.label(
+                                    egui::RichText::new(self.i18n.tr("pex_help_title"))
+                                        .strong()
+                                        .size(16.0),
+                                );
+                                ui.add_space(8.0);
+
+                                egui::Grid::new("pex_help_grid")
+                                    .num_columns(2)
+                                    .spacing([12.0, 10.0])
+                                    .show(ui, |ui| {
+                                        ui.label(
+                                            egui::RichText::new(self.i18n.tr("pex_help_commands"))
+                                                .strong(),
+                                        );
+                                        ui.label(self.i18n.tr("pex_help_commands_val"));
+                                        ui.end_row();
+
+                                        ui.label(
+                                            egui::RichText::new(self.i18n.tr("pex_help_vars"))
+                                                .strong(),
+                                        );
+                                        ui.label(self.i18n.tr("pex_help_vars_val"));
+                                        ui.end_row();
+
+                                        ui.label(
+                                            egui::RichText::new(self.i18n.tr("pex_help_math"))
+                                                .strong(),
+                                        );
+                                        ui.label(self.i18n.tr("pex_help_math_val"));
+                                        ui.end_row();
+
+                                        ui.label(
+                                            egui::RichText::new(
+                                                self.i18n.tr("pex_help_example_title"),
+                                            )
+                                            .strong(),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(
+                                                self.i18n.tr("pex_help_example_val"),
+                                            )
+                                            .monospace(),
+                                        );
+                                        ui.end_row();
+                                    });
                                 ui.add_space(4.0);
-                                ui.label("Commands: normal, conditional, parameter, polar-parameter,\nrgba-parameter, tick-parameter, rgba-tick-polar-parameter ...");
-                                ui.add_space(4.0);
-                                ui.label("Variables: x y z vx vy vz cr cg cb alpha mpsize age t s1 s2 dis destory");
-                                ui.add_space(4.0);
-                                ui.label("Functions: sin cos tan asin acos atan atan2 pow sqrt exp log\nfloor ceil round abs min max random lerp clamp ...");
-                                ui.add_space(4.0);
-                                ui.label("Example:\nparticleex parameter end_rod ~ ~ ~ 1 1 1 1 0 0 0 -10 10 'x=t;y=sin(t)' 0.1 200");
                             });
                         ui.separator();
                     }
@@ -139,32 +181,51 @@ impl NebulaToolsApp {
                             .fill(ui.visuals().faint_bg_color)
                             .inner_margin(10.0)
                             .rounding(8.0)
-                            .stroke(egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color))
+                            .stroke(egui::Stroke::new(
+                                1.0,
+                                ui.visuals().widgets.noninteractive.bg_stroke.color,
+                            ))
                             .show(ui, |ui| {
                                 // Header row
                                 ui.horizontal(|ui| {
                                     ui.checkbox(&mut self.pex.entries[i].enabled, "");
-                                    ui.label(egui::RichText::new(format!("#{}", i + 1)).strong().size(14.0));
-                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        if entry_count > 1 {
-                                            if ui.small_button("🗑").on_hover_text("Remove").clicked() {
-                                                self.pex.confirm_delete = Some(i);
+                                    ui.label(
+                                        egui::RichText::new(format!("#{}", i + 1))
+                                            .strong()
+                                            .size(14.0),
+                                    );
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            if entry_count > 1 {
+                                                if ui
+                                                    .small_button("🗑")
+                                                    .on_hover_text("Remove")
+                                                    .clicked()
+                                                {
+                                                    self.pex.confirm_delete = Some(i);
+                                                }
                                             }
-                                        }
-                                        if ui.small_button("⛶").on_hover_text("Fullscreen").clicked() {
-                                            self.pex.fullscreen_entry = Some(i);
-                                        }
-                                    });
+                                            if ui
+                                                .small_button("⛶")
+                                                .on_hover_text("Fullscreen")
+                                                .clicked()
+                                            {
+                                                self.pex.fullscreen_entry = Some(i);
+                                            }
+                                        },
+                                    );
                                 });
 
                                 ui.add_space(4.0);
 
                                 // Command text
-                                let text_edit = egui::TextEdit::multiline(&mut self.pex.entries[i].command)
-                                    .desired_width(f32::INFINITY)
-                                    .desired_rows(4)
-                                    .code_editor()
-                                    .hint_text("particleex ...");
+                                let text_edit =
+                                    egui::TextEdit::multiline(&mut self.pex.entries[i].command)
+                                        .desired_width(f32::INFINITY)
+                                        .desired_rows(4)
+                                        .code_editor()
+                                        .hint_text("particleex ...");
                                 ui.add(text_edit);
 
                                 // Inline validation
@@ -172,8 +233,18 @@ impl NebulaToolsApp {
                                 if !cmd_text.trim().is_empty() {
                                     let hint = particleex::validate_command(cmd_text);
                                     match hint {
-                                        Ok(info) => { ui.colored_label(egui::Color32::from_rgb(80, 200, 80), &info); }
-                                        Err(err) => { ui.colored_label(egui::Color32::from_rgb(255, 100, 100), &err); }
+                                        Ok(info) => {
+                                            ui.colored_label(
+                                                egui::Color32::from_rgb(80, 200, 80),
+                                                &info,
+                                            );
+                                        }
+                                        Err(err) => {
+                                            ui.colored_label(
+                                                egui::Color32::from_rgb(255, 100, 100),
+                                                &err,
+                                            );
+                                        }
                                     };
                                 }
 
@@ -185,21 +256,51 @@ impl NebulaToolsApp {
                                     .spacing([8.0, 4.0])
                                     .show(ui, |ui| {
                                         ui.label(self.i18n.tr("pex_start_tick"));
-                                        ui.add(egui::DragValue::new(&mut self.pex.entries[i].start_tick)
-                                            .speed(1.0).clamp_range(0.0..=100000.0_f32).suffix(" tick"));
+                                        ui.add(
+                                            egui::DragValue::new(
+                                                &mut self.pex.entries[i].start_tick,
+                                            )
+                                            .speed(1.0)
+                                            .clamp_range(0.0..=100000.0_f32)
+                                            .suffix(" tick"),
+                                        );
                                         ui.end_row();
 
                                         ui.label(self.i18n.tr("pex_position"));
                                         ui.horizontal(|ui| {
-                                            ui.add(egui::DragValue::new(&mut self.pex.entries[i].position[0]).speed(0.1).prefix("X:"));
-                                            ui.add(egui::DragValue::new(&mut self.pex.entries[i].position[1]).speed(0.1).prefix("Y:"));
-                                            ui.add(egui::DragValue::new(&mut self.pex.entries[i].position[2]).speed(0.1).prefix("Z:"));
+                                            ui.add(
+                                                egui::DragValue::new(
+                                                    &mut self.pex.entries[i].position[0],
+                                                )
+                                                .speed(0.1)
+                                                .prefix("X:"),
+                                            );
+                                            ui.add(
+                                                egui::DragValue::new(
+                                                    &mut self.pex.entries[i].position[1],
+                                                )
+                                                .speed(0.1)
+                                                .prefix("Y:"),
+                                            );
+                                            ui.add(
+                                                egui::DragValue::new(
+                                                    &mut self.pex.entries[i].position[2],
+                                                )
+                                                .speed(0.1)
+                                                .prefix("Z:"),
+                                            );
                                         });
                                         ui.end_row();
 
                                         ui.label(self.i18n.tr("pex_duration"));
-                                        ui.add(egui::DragValue::new(&mut self.pex.entries[i].duration_override)
-                                            .speed(1.0).clamp_range(0.0..=100000.0_f32).suffix(" tick"));
+                                        ui.add(
+                                            egui::DragValue::new(
+                                                &mut self.pex.entries[i].duration_override,
+                                            )
+                                            .speed(1.0)
+                                            .clamp_range(0.0..=100000.0_f32)
+                                            .suffix(" tick"),
+                                        );
                                         ui.end_row();
                                     });
                             });
@@ -235,10 +336,19 @@ impl NebulaToolsApp {
 
                     // Add button
                     ui.add_space(12.0);
-                    if ui.add_sized(
-                        [ui.available_width(), 32.0],
-                        egui::Button::new(egui::RichText::new(format!("➕ {}", self.i18n.tr("pex_add_command"))).size(14.0)),
-                    ).clicked() {
+                    if ui
+                        .add_sized(
+                            [ui.available_width(), 32.0],
+                            egui::Button::new(
+                                egui::RichText::new(format!(
+                                    "➕ {}",
+                                    self.i18n.tr("pex_add_command")
+                                ))
+                                .size(14.0),
+                            ),
+                        )
+                        .clicked()
+                    {
                         self.pex.entries.push(PexCommandEntry::default());
                     }
 
@@ -247,18 +357,32 @@ impl NebulaToolsApp {
 
                     // ─── Action Buttons ───
                     ui.add_space(8.0);
-                    if ui.add_sized(
-                        [ui.available_width(), 36.0],
-                        egui::Button::new(egui::RichText::new(self.i18n.tr("particleex_compile")).strong().size(16.0)),
-                    ).clicked() {
+                    if ui
+                        .add_sized(
+                            [ui.available_width(), 36.0],
+                            egui::Button::new(
+                                egui::RichText::new(self.i18n.tr("particleex_compile"))
+                                    .strong()
+                                    .size(16.0),
+                            ),
+                        )
+                        .clicked()
+                    {
                         self.compile_particleex();
                     }
 
                     ui.add_space(8.0);
-                    if ui.add_sized(
-                        [ui.available_width(), 36.0],
-                        egui::Button::new(egui::RichText::new(self.i18n.tr("export_nbl")).strong().size(16.0)),
-                    ).clicked() {
+                    if ui
+                        .add_sized(
+                            [ui.available_width(), 36.0],
+                            egui::Button::new(
+                                egui::RichText::new(self.i18n.tr("export_nbl"))
+                                    .strong()
+                                    .size(16.0),
+                            ),
+                        )
+                        .clicked()
+                    {
                         self.export_particleex_nbl();
                     }
 
@@ -277,7 +401,11 @@ impl NebulaToolsApp {
                     if let Some(ref frames) = self.pex.preview_frames {
                         ui.add_space(12.0);
                         ui.separator();
-                        ui.label(egui::RichText::new(self.i18n.tr("particleex_stats")).strong().size(15.0));
+                        ui.label(
+                            egui::RichText::new(self.i18n.tr("particleex_stats"))
+                                .strong()
+                                .size(15.0),
+                        );
                         ui.add_space(4.0);
 
                         let total_frames = frames.len();

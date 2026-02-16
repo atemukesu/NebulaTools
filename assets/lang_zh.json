@@ -113,7 +113,7 @@
     "particleex_btn": "Particleex",
     "particleex_title": "Particleex 命令编译器",
     "particleex_input": "命令输入",
-    "particleex_hint": "输入 particleex 命令，支持 normal、conditional、parameter、polar-parameter、tick-parameter 等类型。\n表达式用引号包裹，语句用 ; 分隔。\n变量：x y z vx vy vz cr cg cb alpha mpsize age t s1 s2 dis destory",
+    "particleex_hint": "输入 particleex 命令，支持 normal、conditional、parameter、polar-parameter、tick-parameter 等类型。\n表达式用引号包裹，语句用 ; 分隔。\n变量：x y z vx vy vz cr cg cb alpha mpsize age t s1 s2 dis destroy",
     "particleex_compile": "▶ 编译并预览",
     "particleex_compiled": "编译成功，共",
     "particleex_stats": "📊 统计信息",
@@ -126,5 +126,14 @@
     "pex_entries_count": "命令条数",
     "pex_confirm_delete_title": "确认删除",
     "pex_confirm_delete_msg": "确定要删除这条命令吗？",
-    "cancel": "取消"
+    "cancel": "取消",
+    "pex_help_title": "📖 Particleex 语法参考",
+    "pex_help_commands": "命令类型",
+    "pex_help_commands_val": "normal: 基础产生\nconditional: 条件范围内产生\nparameter: 表达式控制运动 (推荐)\npolar-parameter: 极坐标控制运动\ntick-parameter: 参数随时间变化",
+    "pex_help_vars": "变量 (在表达式 expr 中使用)",
+    "pex_help_vars_val": "x, y, z: 相对中心的位置\nvx, vy, vz: 当前速度\ncr, cg, cb: 颜色 (0-255)\nalpha: 透明度 (0-1)\nmpsize: 粒子大小\nage, t: 当前存活时长 (tick)\ndis: 累计移动距离\ndestroy: 设置为 1 则移除粒子",
+    "pex_help_math": "数学函数",
+    "pex_help_math_val": "基础: sin, cos, tan, pow, sqrt, abs, min, max, random, lerp, clamp\n高级: floorDiv, floorMod, fma (融合乘加), multiplyHigh, addExact 等",
+    "pex_help_example_title": "使用示例",
+    "pex_help_example_val": "particleex parameter end_rod ~ ~ ~ 1 1 1 1 0 0 0 -10 10 'vx=cos(t);vy=sin(t)' 0.1 200"
 }

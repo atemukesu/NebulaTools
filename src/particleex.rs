@@ -1099,7 +1099,7 @@ fn generate_tracks(cmd: &ParsedCommand, start_id: i32) -> (Vec<Track>, i32) {
                         true
                     };
 
-                    if spawn && ctx.get("destory") == 0.0 {
+                    if spawn && ctx.get("destroy") == 0.0 {
                         let mut track = Track {
                             id: current_id,
                             keyframes: Vec::new(),
@@ -1128,7 +1128,7 @@ fn generate_tracks(cmd: &ParsedCommand, start_id: i32) -> (Vec<Track>, i32) {
                         sctx.set("mpsize", 0.1);
                         sctx.set("age", 0.0);
                         sctx.set("t", 0.0);
-                        sctx.set("destory", 0.0);
+                        sctx.set("destroy", 0.0);
 
                         for f in 0..total_frames {
                             sctx.set("age", f as f64 / TIME_SCALE);
@@ -1150,7 +1150,7 @@ fn generate_tracks(cmd: &ParsedCommand, start_id: i32) -> (Vec<Track>, i32) {
                                 cur_z = cmd.center[2] + sctx.get("z");
                             }
 
-                            if sctx.get("destory") != 0.0 {
+                            if sctx.get("destroy") != 0.0 {
                                 break;
                             }
 
