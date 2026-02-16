@@ -841,25 +841,40 @@ impl NebulaToolsApp {
                 ui.add_space(8.0);
 
                 let fraction = current as f32 / total.max(1) as f32;
-                ui.add(
-                    egui::ProgressBar::new(fraction)
-                        .text(format!("{} / {}", current, total))
-                        .animate(true),
+
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(format!("{} / {}", current, total))
+                            .strong()
+                            .color(ACCENT),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(format!("{:.1}%", fraction * 100.0));
+                    });
+                });
+
+                ui.add_sized(
+                    [ui.available_width(), 20.0],
+                    egui::ProgressBar::new(fraction).animate(false),
                 );
 
                 let elapsed = start_time.elapsed().as_secs_f32();
                 if current > 0 {
                     let rate = current as f32 / elapsed;
                     let remaining = (total - current) as f32 / rate;
+
                     ui.add_space(4.0);
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "ETA: {:.0}s  |  Elapsed: {:.0}s  |  {:.0} frames/s",
-                            remaining, elapsed, rate
-                        ))
-                        .color(HINT_COLOR)
-                        .size(13.0),
-                    );
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(format!("ETA: {:.0}s", remaining))
+                                .color(HINT_COLOR),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(
+                                egui::RichText::new(format!("{:.0} fps", rate)).color(HINT_COLOR),
+                            );
+                        });
+                    });
                 }
 
                 ui.ctx().request_repaint();

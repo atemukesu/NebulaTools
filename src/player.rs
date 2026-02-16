@@ -787,30 +787,50 @@ pub fn streaming_compress(
     };
     let mut keyframe_list: Vec<u32> = Vec::new();
     let mut compressed_blobs: Vec<Vec<u8>> = Vec::with_capacity(total_frames as usize);
-    let mut prev_snapshot: Vec<Particle> = Vec::new();
 
     // 2. Process each frame one-at-a-time (streaming read)
+    // Double buffering to avoid cloning the heavy particle vector every frame
+    let mut current_snapshot: Vec<Particle> = Vec::new();
+    let mut previous_snapshot: Vec<Particle> = Vec::new();
+
     for frame_idx in 0..total_frames {
         player.process_frame(frame_idx)?;
-        player.current_frame_idx = frame_idx as i32;
 
-        let snapshot: Vec<Particle> = player.particles.values().cloned().collect();
+        // Directly collect into current_snapshot, reusing capacity if possible
+        current_snapshot.clear();
+        current_snapshot.reserve(player.particles.len());
+        // Note: HashMaps don't iterate in deterministic order unless we sort.
+        // NBL format usually relies on ID or order. Let's sort by ID to ensure stable diffs.
+        // If the original particle list was sorted, we should maintain that.
+        // PlayerState::process_frame updates a HashMap, so order is lost.
+        // We MUST sort by ID for P-Frame diffs to be minimal and correct!
+        let mut sorted_particles: Vec<&Particle> = player.particles.values().collect();
+        sorted_particles.sort_by_key(|p| p.id);
+
+        for p in sorted_particles {
+            current_snapshot.push(p.clone());
+        }
+
         let is_keyframe = frame_idx % effective_interval == 0;
 
         let raw = if is_keyframe || frame_idx == 0 {
             keyframe_list.push(frame_idx);
-            encode_i_frame(&snapshot)
+            encode_i_frame(&current_snapshot)
         } else {
-            encode_p_frame(&prev_snapshot, &snapshot)
+            encode_p_frame(&previous_snapshot, &current_snapshot)
         };
 
         let compressed = zstd::encode_all(Cursor::new(&raw), zstd_level)?;
         compressed_blobs.push(compressed);
-        prev_snapshot = snapshot;
 
-        // Update progress
-        if let Ok(mut p) = progress.lock() {
-            p.current_frame = frame_idx + 1;
+        // Swap buffers: current becomes previous for the next iteration
+        std::mem::swap(&mut previous_snapshot, &mut current_snapshot);
+
+        // Update progress every 10 frames to reduce lock contention
+        if frame_idx % 10 == 0 || frame_idx == total_frames - 1 {
+            if let Ok(mut p) = progress.lock() {
+                p.current_frame = frame_idx + 1;
+            }
         }
     }
 
