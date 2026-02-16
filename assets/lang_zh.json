@@ -135,5 +135,9 @@
     "pex_help_math": "数学函数",
     "pex_help_math_val": "基础: sin, cos, tan, pow, sqrt, abs, min, max, random, lerp, clamp\n高级: floorDiv, floorMod, fma (融合乘加), multiplyHigh, addExact 等",
     "pex_help_example_title": "使用示例",
-    "pex_help_example_val": "particleex parameter end_rod ~ ~ ~ 1 1 1 1 0 0 0 -10 10 'vx=cos(t);vy=sin(t)' 0.1 200"
+    "pex_help_example_val": "particleex parameter end_rod ~ ~ ~ 1 1 1 1 0 0 0 -10 10 'vx=cos(t);vy=sin(t)' 0.1 200",
+    "close": "关闭",
+    "pex_command_editor_title": "命令编辑器",
+    "remove": "移除",
+    "fullscreen": "全屏"
 }

@@ -135,5 +135,9 @@
     "pex_help_math": "Math Functions",
     "pex_help_math_val": "Basic: sin, cos, tan, pow, sqrt, abs, min, max, random, lerp, clamp\nAdvanced: floorDiv, floorMod, fma (Fused Multiply-Add), multiplyHigh, addExact, etc.",
     "pex_help_example_title": "Example",
-    "pex_help_example_val": "particleex parameter end_rod ~ ~ ~ 1 1 1 1 0 0 0 -10 10 'vx=cos(t);vy=sin(t)' 0.1 200"
+    "pex_help_example_val": "particleex parameter end_rod ~ ~ ~ 1 1 1 1 0 0 0 -10 10 'vx=cos(t);vy=sin(t)' 0.1 200",
+    "close": "Close",
+    "pex_command_editor_title": "Command Editor",
+    "remove": "Remove",
+    "fullscreen": "Fullscreen"
 }

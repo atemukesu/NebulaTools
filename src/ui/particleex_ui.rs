@@ -43,11 +43,18 @@ impl NebulaToolsApp {
 
                         ui.allocate_ui_at_rect(panel_rect.shrink(16.0), |ui| {
                             ui.horizontal(|ui| {
-                                ui.heading(format!("#{} Command Editor", fs_idx + 1));
+                                ui.heading(format!(
+                                    "#{} {}",
+                                    fs_idx + 1,
+                                    self.i18n.tr("pex_command_editor_title")
+                                ));
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
-                                        if ui.button("✕ Close").clicked() {
+                                        if ui
+                                            .button(format!("x {}", self.i18n.tr("close")))
+                                            .clicked()
+                                        {
                                             close = true;
                                         }
                                     },
@@ -200,7 +207,7 @@ impl NebulaToolsApp {
                                             if entry_count > 1 {
                                                 if ui
                                                     .small_button("🗑")
-                                                    .on_hover_text("Remove")
+                                                    .on_hover_text(self.i18n.tr("remove"))
                                                     .clicked()
                                                 {
                                                     self.pex.confirm_delete = Some(i);
@@ -208,7 +215,7 @@ impl NebulaToolsApp {
                                             }
                                             if ui
                                                 .small_button("⛶")
-                                                .on_hover_text("Fullscreen")
+                                                .on_hover_text(self.i18n.tr("fullscreen"))
                                                 .clicked()
                                             {
                                                 self.pex.fullscreen_entry = Some(i);
