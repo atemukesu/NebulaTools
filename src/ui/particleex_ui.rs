@@ -37,9 +37,9 @@ impl NebulaToolsApp {
 
                         let panel_rect = screen.shrink(40.0);
                         ui.painter()
-                            .rect_filled(screen, 0.0, egui::Color32::from_black_alpha(200));
+                            .rect_filled(screen, 0.0, egui::Color32::from_black_alpha(160));
                         ui.painter()
-                            .rect_filled(panel_rect, 12.0, egui::Color32::from_gray(30));
+                            .rect_filled(panel_rect, 12.0, ui.visuals().window_fill);
 
                         ui.allocate_ui_at_rect(panel_rect.shrink(16.0), |ui| {
                             ui.horizontal(|ui| {
@@ -111,7 +111,7 @@ impl NebulaToolsApp {
                     if self.pex.show_help {
                         ui.add_space(4.0);
                         egui::Frame::none()
-                            .fill(egui::Color32::from_gray(25))
+                            .fill(ui.visuals().faint_bg_color)
                             .inner_margin(8.0)
                             .rounding(6.0)
                             .show(ui, |ui| {
