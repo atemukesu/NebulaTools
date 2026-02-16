@@ -18,14 +18,12 @@ pub enum AppMode {
 #[derive(Serialize, Deserialize)]
 pub struct AppConfig {
     pub lang: Language,
-    pub side_panel_width: f32,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
             lang: Language::ChineseSimplified,
-            side_panel_width: 320.0,
         }
     }
 }
@@ -57,6 +55,7 @@ pub struct NebulaToolsApp {
     pub renderer: Arc<Mutex<Option<ParticleRenderer>>>,
     pub show_grid: bool,
     pub mode: AppMode,
+    pub scrub_frame: Option<u32>,
 }
 
 impl NebulaToolsApp {
@@ -79,6 +78,7 @@ impl NebulaToolsApp {
             renderer: Arc::new(Mutex::new(None)),
             show_grid: true,
             mode: AppMode::Preview,
+            scrub_frame: None,
         }
     }
 
@@ -132,6 +132,7 @@ impl eframe::App for NebulaToolsApp {
             return;
         }
 
+        // --- Logic: Playback ---
         if self.mode == AppMode::Preview && self.player.is_playing {
             if let Some(header) = &self.player.header {
                 let dt = ctx.input(|i| i.stable_dt);
@@ -190,144 +191,14 @@ impl eframe::App for NebulaToolsApp {
                     AppMode::Preview,
                     self.i18n.tr("preview_mode"),
                 );
-
-                if self.mode == AppMode::Preview {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.checkbox(&mut self.show_grid, "Grid");
-                    });
-                }
             });
         });
 
-        let panel_id = if self.mode == AppMode::Preview {
-            "preview_side"
+        if self.mode == AppMode::Preview {
+            self.show_preview_workflow(ctx);
         } else {
-            "edit_side"
-        };
-        egui::SidePanel::left(panel_id)
-            .resizable(true)
-            .width_range(300.0..=600.0)
-            .default_width(self.config.side_panel_width)
-            .show(ctx, |ui| {
-                let w = ui.available_width();
-                if (w - self.config.side_panel_width).abs() > 1.0 {
-                    self.config.side_panel_width = w;
-                    self.save_config();
-                }
-
-                ui.add_space(8.0);
-                if let Some(header) = self.player.header.clone() {
-                    if self.mode == AppMode::Preview {
-                        ui.heading(self.i18n.tr("playback"));
-                        ui.horizontal(|ui| {
-                            let label = if self.player.is_playing {
-                                self.i18n.tr("pause")
-                            } else {
-                                self.i18n.tr("play")
-                            };
-                            if ui.button(label).clicked() {
-                                self.player.is_playing = !self.player.is_playing;
-                            }
-                            if ui.button(self.i18n.tr("stop")).clicked() {
-                                self.player.is_playing = false;
-                                let _ = self.player.seek_to(0);
-                            }
-                        });
-                        let mut frame = self.player.current_frame_idx.max(0) as u32;
-                        if ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut frame,
-                                    0..=header.total_frames.saturating_sub(1),
-                                )
-                                .text(self.i18n.tr("frame")),
-                            )
-                            .changed()
-                        {
-                            self.player.is_playing = false;
-                            let _ = self.player.seek_to(frame);
-                        }
-                        ui.label(format!(
-                            "{}: {}",
-                            self.i18n.tr("particle_count"),
-                            self.player.particles.len()
-                        ));
-                        ui.separator();
-                    } else {
-                        ui.heading(self.i18n.tr("edit_mode"));
-                        ui.label("Properties Editor");
-                        ui.separator();
-                    }
-                    ui.collapsing(self.i18n.tr("metadata"), |ui| {
-                        ui.label(format!("{}: {}", self.i18n.tr("version"), header.version));
-                        ui.label(format!("{}: {}", self.i18n.tr("fps"), header.target_fps));
-                        ui.label(format!(
-                            "{}: {}",
-                            self.i18n.tr("total_frames"),
-                            header.total_frames
-                        ));
-                    });
-                }
-                if let Some(err) = &self.error_msg {
-                    ui.colored_label(egui::Color32::RED, err);
-                }
-            });
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            if self.mode == AppMode::Preview {
-                let (rect, response) =
-                    ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
-                if response.dragged_by(egui::PointerButton::Primary) {
-                    let d = response.drag_delta();
-                    self.camera.yaw -= d.x * 0.01;
-                    self.camera.pitch += d.y * 0.01;
-                    self.camera.pitch = self.camera.pitch.clamp(-1.5, 1.5);
-                }
-                if response.hovered() {
-                    let s = ctx.input(|i| i.smooth_scroll_delta.y);
-                    self.camera.distance = (self.camera.distance - s * 0.1).clamp(1.0, 1000.0);
-                }
-                let particles_data = self.prepare_render_data();
-                let mvp = self.calculate_mvp(rect.width() / rect.height());
-                let renderer_ref = self.renderer.clone();
-                let show_grid = self.show_grid;
-                let rect_height = rect.height();
-                let callback = egui_glow::CallbackFn::new(move |info, painter| {
-                    let mut lock = renderer_ref.lock().unwrap();
-                    if lock.is_none() {
-                        *lock = Some(ParticleRenderer::new(painter.gl()));
-                    }
-                    if let Some(r) = lock.as_ref() {
-                        let scaling = rect_height * info.pixels_per_point * 1.2;
-                        unsafe {
-                            painter.gl().clear_color(0.0, 0.0, 0.0, 1.0);
-                            r.paint(painter.gl(), mvp, &particles_data, scaling, show_grid);
-                        }
-                    }
-                });
-                ui.painter().rect_filled(rect, 0.0, egui::Color32::BLACK);
-                ui.painter().add(egui::PaintCallback {
-                    rect,
-                    callback: Arc::new(callback),
-                });
-                ui.put(
-                    egui::Rect::from_min_size(
-                        rect.min + egui::vec2(10.0, 10.0),
-                        egui::vec2(200.0, 50.0),
-                    ),
-                    |ui: &mut egui::Ui| {
-                        ui.colored_label(egui::Color32::WHITE, self.i18n.tr("preview_3d"));
-                        ui.colored_label(egui::Color32::GRAY, self.i18n.tr("preview_hint"));
-                        ui.label("")
-                    },
-                );
-            } else {
-                ui.centered_and_justified(|ui| {
-                    ui.heading("Editing Canvas (WIP)");
-                    ui.label("Visual editing environment will appear here.");
-                });
-            }
-        });
+            self.show_edit_workflow(ctx);
+        }
     }
 
     fn on_exit(&mut self, gl: Option<&glow::Context>) {
@@ -387,8 +258,14 @@ impl NebulaToolsApp {
                     if ui
                         .add_sized(
                             btn_size,
-                            egui::Button::new(format!("📂 {}", self.i18n.tr("open_existing")))
-                                .rounding(8.0),
+                            egui::Button::new(
+                                egui::RichText::new(format!(
+                                    "📂 {}",
+                                    self.i18n.tr("open_existing")
+                                ))
+                                .size(20.0),
+                            )
+                            .rounding(8.0),
                         )
                         .clicked()
                     {
@@ -398,8 +275,11 @@ impl NebulaToolsApp {
                     if ui
                         .add_sized(
                             btn_size,
-                            egui::Button::new(format!("✨ {}", self.i18n.tr("create_new")))
-                                .rounding(8.0),
+                            egui::Button::new(
+                                egui::RichText::new(format!("✨ {}", self.i18n.tr("create_new")))
+                                    .size(20.0),
+                            )
+                            .rounding(8.0),
                         )
                         .clicked()
                     {}
@@ -411,6 +291,169 @@ impl NebulaToolsApp {
                         format!("{}: Atemukesu", self.i18n.tr("author")),
                     );
                 });
+            });
+        });
+    }
+
+    fn show_preview_workflow(&mut self, ctx: &egui::Context) {
+        // --- Side Panel: Left ---
+        egui::SidePanel::left("metadata_side")
+            .resizable(true)
+            .default_width(260.0)
+            .show(ctx, |ui| {
+                ui.add_space(8.0);
+                ui.heading(self.i18n.tr("metadata"));
+                ui.separator();
+                if let Some(header) = &self.player.header {
+                    ui.label(format!("{}: {}", self.i18n.tr("version"), header.version));
+                    ui.label(format!("{}: {}", self.i18n.tr("fps"), header.target_fps));
+                    ui.label(format!(
+                        "{}: {}",
+                        self.i18n.tr("total_frames"),
+                        header.total_frames
+                    ));
+                    ui.label(format!(
+                        "{}: {}",
+                        self.i18n.tr("particle_count"),
+                        self.player.particles.len()
+                    ));
+                }
+                if let Some(err) = &self.error_msg {
+                    ui.colored_label(egui::Color32::RED, err);
+                }
+            });
+
+        // --- Bottom Panel: New Slider Logic ---
+        egui::TopBottomPanel::bottom("playback_strip")
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    // 1. Playback buttons (Fixed width)
+                    let play_label = if self.player.is_playing {
+                        self.i18n.tr("pause")
+                    } else {
+                        self.i18n.tr("play")
+                    };
+                    if ui.button(play_label).clicked() {
+                        self.player.is_playing = !self.player.is_playing;
+                    }
+                    if ui.button(self.i18n.tr("stop")).clicked() {
+                        self.player.is_playing = false;
+                        let _ = self.player.seek_to(0);
+                    }
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(8.0);
+
+                    if let Some(header) = &self.player.header {
+                        let max_frame = header.total_frames.saturating_sub(1);
+
+                        // 使用 scrub_frame 代理视觉上的当前帧，解决拖拽冲突
+                        let mut visual_frame = self
+                            .scrub_frame
+                            .unwrap_or(self.player.current_frame_idx.max(0) as u32);
+
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.checkbox(&mut self.show_grid, "Grid");
+                            ui.add_space(8.0);
+                            ui.label(format!("/ {}", max_frame));
+
+                            // 1. 当前帧 DragValue
+                            let drag_res = ui.add(
+                                egui::DragValue::new(&mut visual_frame)
+                                    .clamp_range(0..=max_frame)
+                                    .speed(1.0),
+                            );
+
+                            // 2. 进度条
+                            ui.add_space(8.0);
+                            let slider_width = ui.available_width() - 8.0;
+                            let slider_res = ui.add_sized(
+                                [slider_width, ui.spacing().interact_size.y],
+                                egui::Slider::new(&mut visual_frame, 0..=max_frame)
+                                    .show_value(false),
+                            );
+
+                            // --- 状态检测 ---
+                            let is_scrubbing = slider_res.dragged() || drag_res.dragged();
+                            let stop_scrubbing = slider_res.drag_stopped()
+                                || drag_res.drag_stopped()
+                                || drag_res.lost_focus();
+
+                            if is_scrubbing {
+                                self.player.is_playing = false;
+                                self.scrub_frame = Some(visual_frame);
+
+                                // 连续帧微调优化：P帧更新很快，保持实时性
+                                if visual_frame == (self.player.current_frame_idx + 1) as u32 {
+                                    let _ = self.player.seek_to(visual_frame);
+                                }
+                            }
+
+                            if stop_scrubbing {
+                                let _ = self.player.seek_to(visual_frame);
+                                self.scrub_frame = None;
+                            }
+                        });
+                    }
+                });
+                ui.add_space(6.0);
+            });
+
+        // --- Central Panel ---
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let (rect, response) =
+                ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
+            if response.dragged_by(egui::PointerButton::Primary) {
+                let d = response.drag_delta();
+                self.camera.yaw -= d.x * 0.01;
+                self.camera.pitch += d.y * 0.01;
+                self.camera.pitch = self.camera.pitch.clamp(-1.5, 1.5);
+            }
+            if response.hovered() {
+                let s = ctx.input(|i| i.smooth_scroll_delta.y);
+                self.camera.distance = (self.camera.distance - s * 0.1).clamp(1.0, 1000.0);
+            }
+            let particles_data = self.prepare_render_data();
+            let mvp = self.calculate_mvp(rect.width() / rect.height());
+            let renderer_ref = self.renderer.clone();
+            let show_grid = self.show_grid;
+            let rect_height = rect.height();
+            let callback = egui_glow::CallbackFn::new(move |info, painter| {
+                let mut lock = renderer_ref.lock().unwrap();
+                if lock.is_none() {
+                    *lock = Some(ParticleRenderer::new(painter.gl()));
+                }
+                if let Some(r) = lock.as_ref() {
+                    let scaling = rect_height * info.pixels_per_point * 1.2;
+                    unsafe {
+                        painter.gl().clear_color(0.0, 0.0, 0.0, 1.0);
+                        r.paint(painter.gl(), mvp, &particles_data, scaling, show_grid);
+                    }
+                }
+            });
+            ui.painter().rect_filled(rect, 0.0, egui::Color32::BLACK);
+            ui.painter().add(egui::PaintCallback {
+                rect,
+                callback: Arc::new(callback),
+            });
+        });
+    }
+
+    fn show_edit_workflow(&mut self, ctx: &egui::Context) {
+        egui::SidePanel::left("edit_side")
+            .resizable(true)
+            .default_width(260.0)
+            .show(ctx, |ui| {
+                ui.add_space(8.0);
+                ui.heading(self.i18n.tr("edit_mode"));
+                ui.separator();
+                ui.label("Properties Editor");
+            });
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.centered_and_justified(|ui| {
+                ui.heading("Editing Canvas (WIP)");
             });
         });
     }
@@ -439,7 +482,7 @@ impl NebulaToolsApp {
     }
 }
 
-// --- Matrix Utilities ---
+// --- Matrix Utilities (Same as before) ---
 fn look_at(eye: [f32; 3], center: [f32; 3], up: [f32; 3]) -> [f32; 16] {
     let f = normalize([center[0] - eye[0], center[1] - eye[1], center[2] - eye[2]]);
     let s = normalize(cross(f, up));
