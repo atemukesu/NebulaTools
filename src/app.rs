@@ -1,16 +1,33 @@
-use crate::i18n::{tr, Language};
+use crate::i18n::{I18nManager, Language};
 use crate::player::PlayerState;
 use crate::renderer::ParticleRenderer;
 use eframe::{
     egui, egui_glow,
     glow::{self, HasContext},
 };
+use serde::{Deserialize, Serialize};
+use std::fs;
 use std::sync::{Arc, Mutex};
 
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub enum AppMode {
     Edit,
     Preview,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct AppConfig {
+    pub lang: Language,
+    pub side_panel_width: f32,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            lang: Language::ChineseSimplified,
+            side_panel_width: 320.0,
+        }
+    }
 }
 
 pub struct CameraState {
@@ -33,7 +50,8 @@ impl Default for CameraState {
 
 pub struct NebulaToolsApp {
     pub player: PlayerState,
-    pub lang: Language,
+    pub config: AppConfig,
+    pub i18n: I18nManager,
     pub error_msg: Option<String>,
     pub camera: CameraState,
     pub renderer: Arc<Mutex<Option<ParticleRenderer>>>,
@@ -44,15 +62,36 @@ pub struct NebulaToolsApp {
 impl NebulaToolsApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let _ = egui_chinese_font::setup_chinese_fonts(&cc.egui_ctx);
+
+        let config = match fs::read_to_string("config.json") {
+            Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
+            Err(_) => AppConfig::default(),
+        };
+
+        let i18n = I18nManager::new(config.lang);
+
         Self {
             player: PlayerState::default(),
-            lang: Language::ChineseSimplified,
+            config,
+            i18n,
             error_msg: None,
             camera: CameraState::default(),
             renderer: Arc::new(Mutex::new(None)),
             show_grid: true,
             mode: AppMode::Preview,
         }
+    }
+
+    fn save_config(&self) {
+        if let Ok(s) = serde_json::to_string(&self.config) {
+            let _ = fs::write("config.json", s);
+        }
+    }
+
+    fn update_lang(&mut self, lang: Language) {
+        self.config.lang = lang;
+        self.i18n.active_lang = lang;
+        self.save_config();
     }
 
     fn prepare_render_data(&self) -> Vec<f32> {
@@ -79,7 +118,6 @@ impl NebulaToolsApp {
             match self.player.load_file(path) {
                 Ok(_) => {
                     self.error_msg = None;
-                    // 移除自动对焦逻辑，保持相机锁定 [0,0,0]
                 }
                 Err(e) => self.error_msg = Some(format!("Load Failed: {}", e)),
             }
@@ -89,13 +127,11 @@ impl NebulaToolsApp {
 
 impl eframe::App for NebulaToolsApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // 1. Welcome Screen (Early Return)
         if self.player.header.is_none() {
             self.show_welcome_screen(ctx);
             return;
         }
 
-        // 2. Playback Logic (Only in Preview)
         if self.mode == AppMode::Preview && self.player.is_playing {
             if let Some(header) = &self.player.header {
                 let dt = ctx.input(|i| i.stable_dt);
@@ -114,39 +150,45 @@ impl eframe::App for NebulaToolsApp {
             }
         }
 
-        // 3. Main GUI
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
-                ui.menu_button(tr(self.lang, "file"), |ui| {
-                    if ui.button(tr(self.lang, "import")).clicked() {
+                ui.menu_button(self.i18n.tr("file"), |ui| {
+                    if ui.button(self.i18n.tr("import")).clicked() {
                         self.handle_import();
                         ui.close_menu();
                     }
                 });
 
-                ui.menu_button(tr(self.lang, "language"), |ui| {
-                    if ui
-                        .selectable_label(self.lang == Language::ChineseSimplified, "简体中文")
-                        .clicked()
-                    {
-                        self.lang = Language::ChineseSimplified;
-                        ui.close_menu();
-                    }
-                    if ui
-                        .selectable_label(self.lang == Language::English, "English")
-                        .clicked()
-                    {
-                        self.lang = Language::English;
-                        ui.close_menu();
-                    }
-                });
+                egui::ComboBox::from_id_source("top_lang_combo")
+                    .selected_text(self.config.lang.display_name())
+                    .show_ui(ui, |ui| {
+                        let current_lang = self.config.lang;
+                        if ui
+                            .selectable_label(
+                                current_lang == Language::ChineseSimplified,
+                                Language::ChineseSimplified.display_name(),
+                            )
+                            .clicked()
+                        {
+                            self.update_lang(Language::ChineseSimplified);
+                        }
+                        if ui
+                            .selectable_label(
+                                current_lang == Language::English,
+                                Language::English.display_name(),
+                            )
+                            .clicked()
+                        {
+                            self.update_lang(Language::English);
+                        }
+                    });
 
                 ui.separator();
-                ui.selectable_value(&mut self.mode, AppMode::Edit, tr(self.lang, "edit_mode"));
+                ui.selectable_value(&mut self.mode, AppMode::Edit, self.i18n.tr("edit_mode"));
                 ui.selectable_value(
                     &mut self.mode,
                     AppMode::Preview,
-                    tr(self.lang, "preview_mode"),
+                    self.i18n.tr("preview_mode"),
                 );
 
                 if self.mode == AppMode::Preview {
@@ -157,11 +199,135 @@ impl eframe::App for NebulaToolsApp {
             });
         });
 
-        if self.mode == AppMode::Preview {
-            self.show_preview_panels(ctx);
+        let panel_id = if self.mode == AppMode::Preview {
+            "preview_side"
         } else {
-            self.show_edit_panels(ctx);
-        }
+            "edit_side"
+        };
+        egui::SidePanel::left(panel_id)
+            .resizable(true)
+            .width_range(300.0..=600.0)
+            .default_width(self.config.side_panel_width)
+            .show(ctx, |ui| {
+                let w = ui.available_width();
+                if (w - self.config.side_panel_width).abs() > 1.0 {
+                    self.config.side_panel_width = w;
+                    self.save_config();
+                }
+
+                ui.add_space(8.0);
+                if let Some(header) = self.player.header.clone() {
+                    if self.mode == AppMode::Preview {
+                        ui.heading(self.i18n.tr("playback"));
+                        ui.horizontal(|ui| {
+                            let label = if self.player.is_playing {
+                                self.i18n.tr("pause")
+                            } else {
+                                self.i18n.tr("play")
+                            };
+                            if ui.button(label).clicked() {
+                                self.player.is_playing = !self.player.is_playing;
+                            }
+                            if ui.button(self.i18n.tr("stop")).clicked() {
+                                self.player.is_playing = false;
+                                let _ = self.player.seek_to(0);
+                            }
+                        });
+                        let mut frame = self.player.current_frame_idx.max(0) as u32;
+                        if ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut frame,
+                                    0..=header.total_frames.saturating_sub(1),
+                                )
+                                .text(self.i18n.tr("frame")),
+                            )
+                            .changed()
+                        {
+                            self.player.is_playing = false;
+                            let _ = self.player.seek_to(frame);
+                        }
+                        ui.label(format!(
+                            "{}: {}",
+                            self.i18n.tr("particle_count"),
+                            self.player.particles.len()
+                        ));
+                        ui.separator();
+                    } else {
+                        ui.heading(self.i18n.tr("edit_mode"));
+                        ui.label("Properties Editor");
+                        ui.separator();
+                    }
+                    ui.collapsing(self.i18n.tr("metadata"), |ui| {
+                        ui.label(format!("{}: {}", self.i18n.tr("version"), header.version));
+                        ui.label(format!("{}: {}", self.i18n.tr("fps"), header.target_fps));
+                        ui.label(format!(
+                            "{}: {}",
+                            self.i18n.tr("total_frames"),
+                            header.total_frames
+                        ));
+                    });
+                }
+                if let Some(err) = &self.error_msg {
+                    ui.colored_label(egui::Color32::RED, err);
+                }
+            });
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            if self.mode == AppMode::Preview {
+                let (rect, response) =
+                    ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
+                if response.dragged_by(egui::PointerButton::Primary) {
+                    let d = response.drag_delta();
+                    self.camera.yaw -= d.x * 0.01;
+                    self.camera.pitch += d.y * 0.01;
+                    self.camera.pitch = self.camera.pitch.clamp(-1.5, 1.5);
+                }
+                if response.hovered() {
+                    let s = ctx.input(|i| i.smooth_scroll_delta.y);
+                    self.camera.distance = (self.camera.distance - s * 0.1).clamp(1.0, 1000.0);
+                }
+                let particles_data = self.prepare_render_data();
+                let mvp = self.calculate_mvp(rect.width() / rect.height());
+                let renderer_ref = self.renderer.clone();
+                let show_grid = self.show_grid;
+                let rect_height = rect.height();
+                let callback = egui_glow::CallbackFn::new(move |info, painter| {
+                    let mut lock = renderer_ref.lock().unwrap();
+                    if lock.is_none() {
+                        *lock = Some(ParticleRenderer::new(painter.gl()));
+                    }
+                    if let Some(r) = lock.as_ref() {
+                        let scaling = rect_height * info.pixels_per_point * 1.2;
+                        unsafe {
+                            painter.gl().clear_color(0.0, 0.0, 0.0, 1.0);
+                            r.paint(painter.gl(), mvp, &particles_data, scaling, show_grid);
+                        }
+                    }
+                });
+                ui.painter().rect_filled(rect, 0.0, egui::Color32::BLACK);
+                ui.painter().add(egui::PaintCallback {
+                    rect,
+                    callback: Arc::new(callback),
+                });
+                ui.put(
+                    egui::Rect::from_min_size(
+                        rect.min + egui::vec2(10.0, 10.0),
+                        egui::vec2(200.0, 50.0),
+                    ),
+                    |ui: &mut egui::Ui| {
+                        ui.colored_label(egui::Color32::WHITE, self.i18n.tr("preview_3d"));
+                        ui.colored_label(egui::Color32::GRAY, self.i18n.tr("preview_hint"));
+                        ui.label("")
+                    },
+                );
+            } else {
+                ui.centered_and_justified(|ui| {
+                    ui.heading("Editing Canvas (WIP)");
+                    ui.label("Visual editing environment will appear here.");
+                });
+            }
+        });
     }
 
     fn on_exit(&mut self, gl: Option<&glow::Context>) {
@@ -176,196 +342,77 @@ impl eframe::App for NebulaToolsApp {
 impl NebulaToolsApp {
     fn show_welcome_screen(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
+            ui.with_layout(egui::Layout::top_down(egui::Align::RIGHT), |ui| {
+                egui::ComboBox::from_id_source("welcome_lang")
+                    .selected_text(self.config.lang.display_name())
+                    .show_ui(ui, |ui| {
+                        let current_lang = self.config.lang;
+                        if ui
+                            .selectable_label(
+                                current_lang == Language::ChineseSimplified,
+                                Language::ChineseSimplified.display_name(),
+                            )
+                            .clicked()
+                        {
+                            self.update_lang(Language::ChineseSimplified);
+                        }
+                        if ui
+                            .selectable_label(
+                                current_lang == Language::English,
+                                Language::English.display_name(),
+                            )
+                            .clicked()
+                        {
+                            self.update_lang(Language::English);
+                        }
+                    });
+            });
+
             ui.vertical_centered(|ui| {
                 ui.add_space(ui.available_height() * 0.2);
-
                 ui.heading(
                     egui::RichText::new(format!(
                         "{} NebulaTools v{}",
-                        tr(self.lang, "welcome"),
+                        self.i18n.tr("welcome"),
                         env!("CARGO_PKG_VERSION")
                     ))
                     .size(40.0)
                     .strong(),
                 );
-
                 ui.add_space(40.0);
-
                 ui.horizontal(|ui| {
-                    ui.add_space((ui.available_width() - 420.0) / 2.0); // Simple center
-
+                    let total_width = 420.0;
+                    ui.add_space((ui.available_width() - total_width) / 2.0);
                     let btn_size = egui::vec2(200.0, 60.0);
                     if ui
                         .add_sized(
                             btn_size,
-                            egui::Button::new(format!("📂 {}", tr(self.lang, "open_existing")))
+                            egui::Button::new(format!("📂 {}", self.i18n.tr("open_existing")))
                                 .rounding(8.0),
                         )
                         .clicked()
                     {
                         self.handle_import();
                     }
-
                     ui.add_space(20.0);
-
                     if ui
                         .add_sized(
                             btn_size,
-                            egui::Button::new(format!("✨ {}", tr(self.lang, "create_new")))
+                            egui::Button::new(format!("✨ {}", self.i18n.tr("create_new")))
                                 .rounding(8.0),
                         )
                         .clicked()
-                    {
-                        // Create placeholder
-                    }
+                    {}
                 });
-
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
                     ui.add_space(20.0);
                     ui.colored_label(
                         egui::Color32::GRAY,
-                        format!("{}: Atemukesu", tr(self.lang, "author")),
+                        format!("{}: Atemukesu", self.i18n.tr("author")),
                     );
                 });
             });
         });
-    }
-
-    fn show_preview_panels(&mut self, ctx: &egui::Context) {
-        egui::SidePanel::left("preview_side")
-            .resizable(true)
-            .min_width(300.0)
-            .show(ctx, |ui| {
-                ui.add_space(8.0);
-                if let Some(header) = self.player.header.clone() {
-                    ui.heading(tr(self.lang, "playback"));
-                    ui.horizontal(|ui| {
-                        let label = if self.player.is_playing {
-                            tr(self.lang, "pause")
-                        } else {
-                            tr(self.lang, "play")
-                        };
-                        if ui.button(label).clicked() {
-                            self.player.is_playing = !self.player.is_playing;
-                        }
-                        if ui.button(tr(self.lang, "stop")).clicked() {
-                            self.player.is_playing = false;
-                            let _ = self.player.seek_to(0);
-                        }
-                    });
-
-                    let mut frame = self.player.current_frame_idx.max(0) as u32;
-                    let max_frame = header.total_frames.saturating_sub(1);
-                    if ui
-                        .add(
-                            egui::Slider::new(&mut frame, 0..=max_frame)
-                                .text(tr(self.lang, "frame")),
-                        )
-                        .changed()
-                    {
-                        self.player.is_playing = false;
-                        let _ = self.player.seek_to(frame);
-                    }
-                    ui.label(format!(
-                        "{}: {}",
-                        tr(self.lang, "particle_count"),
-                        self.player.particles.len()
-                    ));
-
-                    ui.separator();
-                    ui.collapsing(tr(self.lang, "metadata"), |ui| {
-                        ui.label(format!("{}: {}", tr(self.lang, "version"), header.version));
-                        ui.label(format!("{}: {}", tr(self.lang, "fps"), header.target_fps));
-                        ui.label(format!(
-                            "{}: {}",
-                            tr(self.lang, "total_frames"),
-                            header.total_frames
-                        ));
-                    });
-                }
-
-                if let Some(err) = &self.error_msg {
-                    ui.colored_label(egui::Color32::RED, err);
-                }
-            });
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            let (rect, response) =
-                ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
-
-            // Camera interaction (Pitch fixed)
-            if response.dragged_by(egui::PointerButton::Primary) {
-                let delta = response.drag_delta();
-                self.camera.yaw -= delta.x * 0.01;
-                self.camera.pitch += delta.y * 0.01; // Up/Down habit fix
-                self.camera.pitch = self.camera.pitch.clamp(-1.5, 1.5);
-            }
-            if response.hovered() {
-                let scroll = ctx.input(|i| i.smooth_scroll_delta.y);
-                self.camera.distance -= scroll * 0.1;
-                self.camera.distance = self.camera.distance.clamp(1.0, 1000.0);
-            }
-
-            let particles_data = self.prepare_render_data();
-            let mvp = self.calculate_mvp(rect.width() / rect.height());
-            let renderer_ref = self.renderer.clone();
-            let show_grid = self.show_grid;
-            let rect_height = rect.height();
-
-            let callback = egui_glow::CallbackFn::new(move |info, painter| {
-                let mut lock = renderer_ref.lock().unwrap();
-                if lock.is_none() {
-                    *lock = Some(ParticleRenderer::new(painter.gl()));
-                }
-                if let Some(renderer) = lock.as_ref() {
-                    let px_height = rect_height * info.pixels_per_point;
-                    let scaling = px_height * 1.2;
-                    unsafe {
-                        painter.gl().clear_color(0.0, 0.0, 0.0, 1.0);
-                        renderer.paint(painter.gl(), mvp, &particles_data, scaling, show_grid);
-                    }
-                }
-            });
-
-            ui.painter().rect_filled(rect, 0.0, egui::Color32::BLACK);
-            ui.painter().add(egui::PaintCallback {
-                rect,
-                callback: Arc::new(callback),
-            });
-
-            // Overlay Text
-            ui.put(
-                egui::Rect::from_min_size(
-                    rect.min + egui::vec2(10.0, 10.0),
-                    egui::vec2(200.0, 50.0),
-                ),
-                |ui: &mut egui::Ui| {
-                    ui.colored_label(egui::Color32::WHITE, tr(self.lang, "preview_3d"));
-                    ui.colored_label(egui::Color32::GRAY, tr(self.lang, "preview_hint"));
-                    ui.label("")
-                },
-            );
-        });
-    }
-
-    fn show_edit_panels(&mut self, ctx: &egui::Context) {
-        egui::SidePanel::left("edit_side")
-            .resizable(true)
-            .min_width(320.0)
-            .show(ctx, |ui| {
-                ui.heading(tr(self.lang, "edit_mode"));
-                ui.separator();
-                ui.label("Components Properties");
-                // Placeholder for future properties
-            });
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.centered_and_justified(|ui| {
-                ui.heading("Editing Canvas (WIP)");
-                ui.label("Visual editing environment will appear here.");
-            });
-        });
-        // Rendering is skipped here, significantly reducing GPU usage
     }
 
     fn calculate_mvp(&self, aspect: f32) -> [f32; 16] {

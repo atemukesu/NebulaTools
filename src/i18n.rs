@@ -1,10 +1,12 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Language {
     ChineseSimplified,
     English,
 }
 
-#[allow(dead_code)]
 impl Language {
     pub fn display_name(&self) -> &'static str {
         match self {
@@ -12,81 +14,63 @@ impl Language {
             Language::English => "English",
         }
     }
+
+    pub fn config_key(&self) -> &'static str {
+        match self {
+            Language::ChineseSimplified => "zh",
+            Language::English => "en",
+        }
+    }
 }
 
-pub fn tr(lang: Language, key: &str) -> &'static str {
-    match lang {
-        Language::ChineseSimplified => match key {
-            "window_title" => "NebulaTools - NBL 格式调试器",
-            "file" => "文件",
-            "import" => "导入 .nbl",
-            "export" => "导出 (未实现)",
-            "metadata" => "元数据",
-            "playback" => "播放控制",
-            "total_frames" => "总帧数",
-            "textures" => "纹理列表",
-            "version" => "版本",
-            "fps" => "目标 FPS",
-            "particle_count" => "当前粒子数",
-            "error" => "错误",
-            "play" => "播放",
-            "pause" => "暂停",
-            "stop" => "停止",
-            "frame" => "帧",
-            "language" => "语言",
-            "inspector" => "数据检视器",
-            "preview_3d" => "3D 预览",
-            "preview_hint" => "左键旋转，滚动缩放",
-            "bbox" => "包围盒",
-            "yes" => "是",
-            "no" => "否",
-            "has_alpha" => "颜色包含 Alpha",
-            "has_size" => "包含大小信息",
-            "duration" => "时长",
-            "keyframe_count" => "关键帧数",
-            "open_existing" => "打开现有",
-            "create_new" => "创建新的",
-            "edit_mode" => "编辑",
-            "preview_mode" => "预览",
-            "author" => "作者",
-            "welcome" => "欢迎使用",
-            _ => "Unknown",
-        },
-        Language::English => match key {
-            "window_title" => "NebulaTools - NBL Format Debugger",
-            "file" => "File",
-            "import" => "Import .nbl",
-            "export" => "Export (WIP)",
-            "metadata" => "Metadata",
-            "playback" => "Playback",
-            "total_frames" => "Total Frames",
-            "textures" => "Textures",
-            "version" => "Version",
-            "fps" => "Target FPS",
-            "particle_count" => "Active Particles",
-            "error" => "Error",
-            "play" => "Play",
-            "pause" => "Pause",
-            "stop" => "Stop",
-            "frame" => "Frame",
-            "language" => "Language",
-            "inspector" => "Inspector",
-            "preview_3d" => "3D Preview",
-            "preview_hint" => "Drag to rotate, Scroll to zoom",
-            "bbox" => "Bounding Box",
-            "yes" => "Yes",
-            "no" => "No",
-            "has_alpha" => "Has Alpha",
-            "has_size" => "Has Size",
-            "duration" => "Duration",
-            "keyframe_count" => "Keyframes",
-            "open_existing" => "Open Existing",
-            "create_new" => "Create New",
-            "edit_mode" => "Edit",
-            "preview_mode" => "Preview",
-            "author" => "Author",
-            "welcome" => "Welcome to",
-            _ => "Unknown",
-        },
+pub struct I18nManager {
+    pub active_lang: Language,
+    // 使用 Box::leak 后的静态映射，确保 tr 返回 &'static str
+    translations: HashMap<&'static str, HashMap<&'static str, &'static str>>,
+}
+
+impl I18nManager {
+    pub fn new(lang: Language) -> Self {
+        let mut manager = Self {
+            active_lang: lang,
+            translations: HashMap::new(),
+        };
+        manager.load_all();
+        manager
+    }
+
+    fn load_all(&mut self) {
+        let zh_json = include_str!("../assets/lang_zh.json");
+        let en_json = include_str!("../assets/lang_en.json");
+
+        self.translations
+            .insert("zh", Self::parse_and_leak(zh_json));
+        self.translations
+            .insert("en", Self::parse_and_leak(en_json));
+    }
+
+    fn parse_and_leak(json: &str) -> HashMap<&'static str, &'static str> {
+        let raw: HashMap<String, String> = serde_json::from_str(json).unwrap_or_default();
+        let mut leaked = HashMap::new();
+        for (k, v) in raw {
+            // 将读取到的字符串永久保留在内存中，换取 &'static 生命周期
+            let k_static: &'static str = Box::leak(k.into_boxed_str());
+            let v_static: &'static str = Box::leak(v.into_boxed_str());
+            leaked.insert(k_static, v_static);
+        }
+        leaked
+    }
+
+    /// 现在返回的是 &'static str，不再与 self 绑定，解决了所有的 Borrow Checker 问题
+    pub fn tr(&self, key: &str) -> &'static str {
+        let lang_key = self.active_lang.config_key();
+        if let Some(map) = self.translations.get(lang_key) {
+            if let Some(val) = map.get(key) {
+                return val;
+            }
+        }
+        // 如果找不到翻译，为了维持 &'static，我们需要泄漏一下这个 key 或返回预定义的静态字符串
+        // 考虑到 key 通常是字面量，这在实际场景中几乎不会发生
+        Box::leak(key.to_string().into_boxed_str())
     }
 }

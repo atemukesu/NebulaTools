@@ -2119,6 +2119,7 @@ dependencies = [
  "glow",
  "rfd",
  "serde",
+ "serde_json",
  "zstd",
 ]
 
