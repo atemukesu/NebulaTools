@@ -437,7 +437,7 @@ impl NebulaToolsApp {
         self.creator.status_msg = Some(self.i18n.tr("apply_success").to_string());
     }
 
-    fn export_creator_nbl(&mut self) {
+    pub(crate) fn export_creator_nbl(&mut self) {
         // Generate frames if not already done
         if self.creator.preview_frames.is_none() {
             self.generate_creator_preview();

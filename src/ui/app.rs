@@ -353,9 +353,16 @@ impl eframe::App for NebulaToolsApp {
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button(self.i18n.tr("file"), |ui| {
-                    if ui.button(self.i18n.tr("import")).clicked() {
-                        self.handle_import();
-                        ui.close_menu();
+                    if self.mode == AppMode::Create {
+                        if ui.button(self.i18n.tr("export_nbl")).clicked() {
+                            self.export_creator_nbl();
+                            ui.close_menu();
+                        }
+                    } else {
+                        if ui.button(self.i18n.tr("import")).clicked() {
+                            self.handle_import();
+                            ui.close_menu();
+                        }
                     }
                 });
 
