@@ -79,13 +79,7 @@ impl NebulaToolsApp {
             match self.player.load_file(path) {
                 Ok(_) => {
                     self.error_msg = None;
-                    if let Some(h) = &self.player.header {
-                        self.camera.target = [
-                            (h.bbox_min[0] + h.bbox_max[0]) * 0.5,
-                            (h.bbox_min[1] + h.bbox_max[1]) * 0.5,
-                            (h.bbox_min[2] + h.bbox_max[2]) * 0.5,
-                        ];
-                    }
+                    // 移除自动对焦逻辑，保持相机锁定 [0,0,0]
                 }
                 Err(e) => self.error_msg = Some(format!("Load Failed: {}", e)),
             }
