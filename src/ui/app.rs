@@ -247,7 +247,7 @@ impl NebulaToolsApp {
     }
 
     pub fn calculate_projection_matrix(&self, aspect: f32) -> [f32; 16] {
-        crate::math::perspective(45.0f32.to_radians(), aspect, 0.1, 5000.0)
+        crate::math::perspective(45.0f32.to_radians(), aspect, 0.1, 1000000.0)
     }
 
     /// Shared 3D viewport rendering (used by both preview and creator).
@@ -267,7 +267,7 @@ impl NebulaToolsApp {
         }
         if response.hovered() {
             let s = ctx.input(|i| i.smooth_scroll_delta.y);
-            self.camera.distance = (self.camera.distance - s * 0.1).clamp(1.0, 1000.0);
+            self.camera.distance = (self.camera.distance - s * 0.1).clamp(0.1, 1000000.0);
         }
         let aspect = rect.width() / rect.height();
         let mvp = self.calculate_mvp(aspect);
@@ -352,6 +352,12 @@ impl eframe::App for NebulaToolsApp {
 
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
+                if ui.button(self.i18n.tr("home")).clicked() {
+                    self.mode = AppMode::Preview;
+                    self.player.header = None;
+                }
+                ui.separator();
+
                 ui.menu_button(self.i18n.tr("file"), |ui| {
                     if self.mode == AppMode::Create {
                         if ui.button(self.i18n.tr("export_nbl")).clicked() {
@@ -398,12 +404,9 @@ impl eframe::App for NebulaToolsApp {
                         AppMode::Preview,
                         self.i18n.tr("preview_mode"),
                     );
+                } else if self.mode == AppMode::Create {
+                    ui.selectable_value(&mut self.mode, AppMode::Create, self.i18n.tr("creator"));
                 }
-                ui.selectable_value(
-                    &mut self.mode,
-                    AppMode::Create,
-                    self.i18n.tr("create_editor"),
-                );
             });
         });
 

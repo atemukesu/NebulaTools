@@ -30,7 +30,7 @@ impl NebulaToolsApp {
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     ui.add_space(8.0);
-                    ui.heading(self.i18n.tr("create_editor"));
+                    ui.heading(self.i18n.tr("creator"));
                     ui.separator();
 
                     // ===== Preset Selection =====
@@ -106,8 +106,8 @@ impl NebulaToolsApp {
                                     ui.label(format!("{}:", self.i18n.tr("radius")));
                                     ui.add(
                                         egui::DragValue::new(&mut self.creator.config.shape_radius)
-                                            .clamp_range(0.01..=50.0)
-                                            .speed(0.05)
+                                            .clamp_range(0.0..=10000.0)
+                                            .speed(0.1)
                                             .fixed_decimals(2),
                                     );
                                     ui.end_row();
@@ -146,7 +146,7 @@ impl NebulaToolsApp {
                             ui.label(self.i18n.tr("emission_rate"));
                             ui.add(
                                 egui::DragValue::new(&mut self.creator.config.emission_rate)
-                                    .clamp_range(0.0..=1000.0)
+                                    .clamp_range(0.0..=100000.0)
                                     .speed(1.0)
                                     .suffix(" /s"),
                             );
@@ -155,8 +155,8 @@ impl NebulaToolsApp {
                             ui.label(self.i18n.tr("burst_count"));
                             ui.add(
                                 egui::DragValue::new(&mut self.creator.config.burst_count)
-                                    .clamp_range(0..=5000)
-                                    .speed(5.0),
+                                    .clamp_range(0..=1000000)
+                                    .speed(10.0),
                             );
                             ui.end_row();
 
@@ -171,7 +171,7 @@ impl NebulaToolsApp {
                             ui.label(self.i18n.tr("particle_lifetime"));
                             ui.add(
                                 egui::DragValue::new(&mut self.creator.config.lifetime_frames)
-                                    .clamp_range(1..=600)
+                                    .clamp_range(1..=100000)
                                     .speed(1.0)
                                     .suffix(" frames"),
                             );
@@ -182,15 +182,15 @@ impl NebulaToolsApp {
                             ui.horizontal(|ui| {
                                 ui.add(
                                     egui::DragValue::new(&mut self.creator.config.speed_min)
-                                        .clamp_range(0.0..=100.0)
-                                        .speed(0.1)
+                                        .clamp_range(-10000.0..=10000.0)
+                                        .speed(0.5)
                                         .fixed_decimals(1)
                                         .prefix("min:"),
                                 );
                                 ui.add(
                                     egui::DragValue::new(&mut self.creator.config.speed_max)
-                                        .clamp_range(0.0..=100.0)
-                                        .speed(0.1)
+                                        .clamp_range(-10000.0..=10000.0)
+                                        .speed(0.5)
                                         .fixed_decimals(1)
                                         .prefix("max:"),
                                 );
@@ -221,7 +221,7 @@ impl NebulaToolsApp {
                             ui.label(format!("{}:", self.i18n.tr("spread")));
                             ui.add(
                                 egui::DragValue::new(&mut self.creator.config.spread)
-                                    .clamp_range(0.0..=180.0)
+                                    .clamp_range(0.0..=360.0)
                                     .speed(1.0)
                                     .suffix("°"),
                             );
@@ -239,7 +239,7 @@ impl NebulaToolsApp {
                             ui.label(format!("{}:", self.i18n.tr("drag")));
                             ui.add(
                                 egui::DragValue::new(&mut self.creator.config.drag)
-                                    .clamp_range(0.0..=1.0)
+                                    .clamp_range(-10.0..=10.0)
                                     .speed(0.005)
                                     .fixed_decimals(3),
                             );
@@ -276,8 +276,8 @@ impl NebulaToolsApp {
                         ui.label(self.i18n.tr("size_start"));
                         ui.add(
                             egui::DragValue::new(&mut self.creator.config.size_start)
-                                .clamp_range(0.01..=50.0)
-                                .speed(0.01)
+                                .clamp_range(0.0..=10000.0)
+                                .speed(0.1)
                                 .fixed_decimals(2),
                         );
                     });
@@ -285,8 +285,8 @@ impl NebulaToolsApp {
                         ui.label(self.i18n.tr("size_end"));
                         ui.add(
                             egui::DragValue::new(&mut self.creator.config.size_end)
-                                .clamp_range(0.0..=50.0)
-                                .speed(0.01)
+                                .clamp_range(0.0..=10000.0)
+                                .speed(0.1)
                                 .fixed_decimals(2),
                         );
                     });
@@ -305,7 +305,7 @@ impl NebulaToolsApp {
                         ui.label(self.i18n.tr("target_fps_setting"));
                         ui.add(
                             egui::DragValue::new(&mut self.creator.config.target_fps)
-                                .clamp_range(1..=120)
+                                .clamp_range(1..=1000)
                                 .speed(1.0),
                         );
                     });
@@ -313,8 +313,8 @@ impl NebulaToolsApp {
                         ui.label(self.i18n.tr("anim_duration"));
                         ui.add(
                             egui::DragValue::new(&mut self.creator.config.duration_secs)
-                                .clamp_range(0.1..=60.0)
-                                .speed(0.1)
+                                .clamp_range(0.01..=36000.0)
+                                .speed(1.0)
                                 .fixed_decimals(1)
                                 .suffix(" s"),
                         );
