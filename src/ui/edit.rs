@@ -38,6 +38,7 @@ impl NebulaToolsApp {
                     (crate::ui::app::EditTool::Color, "edit_color"),
                     (crate::ui::app::EditTool::Transform, "edit_transform"),
                     (crate::ui::app::EditTool::Trim, "edit_trim"),
+                    (crate::ui::app::EditTool::Compress, "edit_compress"),
                 ];
 
                 for (tool, lang_key) in tools {
@@ -86,6 +87,7 @@ impl NebulaToolsApp {
                     crate::ui::app::EditTool::Color => self.i18n.tr("edit_color"),
                     crate::ui::app::EditTool::Transform => self.i18n.tr("edit_transform"),
                     crate::ui::app::EditTool::Trim => self.i18n.tr("edit_trim"),
+                    crate::ui::app::EditTool::Compress => self.i18n.tr("edit_compress"),
                 };
                 ui.heading(egui::RichText::new(title).size(24.0).strong());
                 ui.add_space(10.0);
@@ -103,6 +105,7 @@ impl NebulaToolsApp {
                         crate::ui::app::EditTool::Color => self.ui_color_params(ui),
                         crate::ui::app::EditTool::Transform => self.ui_transform_params(ui),
                         crate::ui::app::EditTool::Trim => self.ui_trim_params(ui),
+                        crate::ui::app::EditTool::Compress => self.ui_compress_params(ui),
                     });
 
                 ui.add_space(20.0);
@@ -550,6 +553,113 @@ impl NebulaToolsApp {
             .save_file()
         {
             match self.player.save_file(&path, &header, &textures, &frames) {
+                Ok(_) => {
+                    self.edit.status_msg = Some(self.i18n.tr("apply_success").to_string());
+                }
+                Err(e) => {
+                    self.edit.status_msg = Some(format!("{}: {}", self.i18n.tr("apply_failed"), e));
+                }
+            }
+        }
+    }
+
+    fn ui_compress_params(&mut self, ui: &mut egui::Ui) {
+        // Warning message
+        ui.horizontal_wrapped(|ui| {
+            ui.label(
+                egui::RichText::new("⚠")
+                    .color(egui::Color32::from_rgb(255, 200, 50))
+                    .size(18.0),
+            );
+            ui.label(
+                egui::RichText::new(self.i18n.tr("compress_warning"))
+                    .color(egui::Color32::from_rgb(255, 200, 50))
+                    .strong(),
+            );
+        });
+        ui.add_space(8.0);
+
+        ui.label(egui::RichText::new(self.i18n.tr("edit_compress_desc")).weak());
+        ui.add_space(12.0);
+
+        egui::Grid::new("compress_grid")
+            .num_columns(2)
+            .spacing([12.0, 10.0])
+            .show(ui, |ui| {
+                // Keyframe interval
+                ui.label(self.i18n.tr("compress_keyframe_interval"));
+                ui.vertical(|ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut self.edit.compress_keyframe_interval)
+                            .clamp_range(0..=120)
+                            .speed(1.0),
+                    );
+                    ui.label(
+                        egui::RichText::new(self.i18n.tr("compress_keyframe_interval_desc"))
+                            .small()
+                            .weak(),
+                    );
+                });
+                ui.end_row();
+
+                // Zstd level
+                ui.label(self.i18n.tr("compress_zstd_level"));
+                ui.vertical(|ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut self.edit.compress_zstd_level)
+                            .clamp_range(1..=5)
+                            .speed(1.0),
+                    );
+                    ui.label(
+                        egui::RichText::new(self.i18n.tr("compress_zstd_level_desc"))
+                            .small()
+                            .weak(),
+                    );
+                });
+                ui.end_row();
+            });
+
+        ui.add_space(16.0);
+        if ui
+            .button(egui::RichText::new(format!("▶ {}", self.i18n.tr("compress_export"))).strong())
+            .clicked()
+        {
+            self.save_compressed_file();
+        }
+    }
+
+    fn save_compressed_file(&mut self) {
+        let frames = match self.edit.decoded_frames {
+            Some(ref f) => f.clone(),
+            None => {
+                self.edit.status_msg = Some(self.i18n.tr("apply_failed").to_string());
+                return;
+            }
+        };
+        let header = match self.edit.edited_header {
+            Some(ref h) => h.clone(),
+            None => {
+                self.edit.status_msg = Some(self.i18n.tr("apply_failed").to_string());
+                return;
+            }
+        };
+        let textures = self.player.textures.clone();
+        let keyframe_interval = self.edit.compress_keyframe_interval;
+        let zstd_level = self.edit.compress_zstd_level;
+
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("Nebula", &["nbl"])
+            .set_file_name("output_compressed.nbl")
+            .save_file()
+        {
+            match crate::player::save_file_compressed(
+                &path,
+                &header,
+                &textures,
+                &frames,
+                keyframe_interval,
+                zstd_level,
+            ) {
                 Ok(_) => {
                     self.edit.status_msg = Some(self.i18n.tr("apply_success").to_string());
                 }

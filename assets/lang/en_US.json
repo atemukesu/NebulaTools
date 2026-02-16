@@ -139,5 +139,13 @@
     "close": "Close",
     "pex_command_editor_title": "Command Editor",
     "remove": "Remove",
-    "fullscreen": "Fullscreen"
+    "fullscreen": "Fullscreen",
+    "edit_compress": "🗜️ NBL Compression",
+    "edit_compress_desc": "Re-encode the NBL file using I/P frame compression to reduce file size. I-Frames store full particle snapshots; P-Frames store only deltas from the previous frame, significantly reducing redundancy.",
+    "compress_warning": "If you don't understand what this does, please do not use it.",
+    "compress_keyframe_interval": "Keyframe Interval",
+    "compress_keyframe_interval_desc": "Insert an I-Frame (full snapshot) every N frames. More I-Frames = larger file but faster seeking. (0 = every frame is an I-Frame)",
+    "compress_zstd_level": "Zstd Compression Level",
+    "compress_zstd_level_desc": "Higher level = better compression ratio but slower encoding. Range: 1-5.",
+    "compress_export": "Export Compressed .nbl"
 }

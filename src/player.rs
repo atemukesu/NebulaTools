@@ -646,3 +646,204 @@ pub fn edit_trim_frames(frames: &[Vec<Particle>], start: usize, end: usize) -> V
     let start = start.min(end);
     frames[start..=end].to_vec()
 }
+
+/// Encode a P-Frame: delta between prev_particles and cur_particles.
+/// Uses zero-basis principle for newly spawned particles.
+fn encode_p_frame(prev_particles: &[Particle], cur_particles: &[Particle]) -> Vec<u8> {
+    let prev_map: HashMap<i32, &Particle> = prev_particles.iter().map(|p| (p.id, p)).collect();
+    let n = cur_particles.len();
+
+    let payload_size = 5 + n * 2 * 3 + n * 4 + n * 2 + n + n + n * 4;
+    let mut buf = Vec::with_capacity(payload_size);
+
+    buf.push(1u8); // FrameType = P-Frame
+    let _ = buf.write_u32::<LittleEndian>(n as u32);
+
+    // SoA: dX, dY, dZ (int16, * 1000)
+    for p in cur_particles {
+        let prev = prev_map.get(&p.id);
+        let prev_x = prev.map_or(0.0, |pp| pp.pos[0]);
+        let dx = ((p.pos[0] - prev_x) * 1000.0)
+            .round()
+            .clamp(-32768.0, 32767.0) as i16;
+        let _ = buf.write_i16::<LittleEndian>(dx);
+    }
+    for p in cur_particles {
+        let prev = prev_map.get(&p.id);
+        let prev_y = prev.map_or(0.0, |pp| pp.pos[1]);
+        let dy = ((p.pos[1] - prev_y) * 1000.0)
+            .round()
+            .clamp(-32768.0, 32767.0) as i16;
+        let _ = buf.write_i16::<LittleEndian>(dy);
+    }
+    for p in cur_particles {
+        let prev = prev_map.get(&p.id);
+        let prev_z = prev.map_or(0.0, |pp| pp.pos[2]);
+        let dz = ((p.pos[2] - prev_z) * 1000.0)
+            .round()
+            .clamp(-32768.0, 32767.0) as i16;
+        let _ = buf.write_i16::<LittleEndian>(dz);
+    }
+
+    // SoA: dR, dG, dB, dA (int8)
+    for p in cur_particles {
+        let prev = prev_map.get(&p.id);
+        let prev_r = prev.map_or(0u8, |pp| pp.color[0]);
+        let dr = (p.color[0] as i16 - prev_r as i16).clamp(-128, 127) as i8;
+        buf.push(dr as u8);
+    }
+    for p in cur_particles {
+        let prev = prev_map.get(&p.id);
+        let prev_g = prev.map_or(0u8, |pp| pp.color[1]);
+        let dg = (p.color[1] as i16 - prev_g as i16).clamp(-128, 127) as i8;
+        buf.push(dg as u8);
+    }
+    for p in cur_particles {
+        let prev = prev_map.get(&p.id);
+        let prev_b = prev.map_or(0u8, |pp| pp.color[2]);
+        let db = (p.color[2] as i16 - prev_b as i16).clamp(-128, 127) as i8;
+        buf.push(db as u8);
+    }
+    for p in cur_particles {
+        let prev = prev_map.get(&p.id);
+        let prev_a = prev.map_or(0u8, |pp| pp.color[3]);
+        let da = (p.color[3] as i16 - prev_a as i16).clamp(-128, 127) as i8;
+        buf.push(da as u8);
+    }
+
+    // SoA: dSize (int16, * 100)
+    for p in cur_particles {
+        let prev = prev_map.get(&p.id);
+        let prev_size = prev.map_or(0.0, |pp| pp.size);
+        let ds = ((p.size - prev_size) * 100.0)
+            .round()
+            .clamp(-32768.0, 32767.0) as i16;
+        let _ = buf.write_i16::<LittleEndian>(ds);
+    }
+
+    // SoA: dTexID (int8)
+    for p in cur_particles {
+        let prev = prev_map.get(&p.id);
+        let prev_tex = prev.map_or(0u8, |pp| pp.tex_id);
+        let dt = (p.tex_id as i16 - prev_tex as i16).clamp(-128, 127) as i8;
+        buf.push(dt as u8);
+    }
+
+    // SoA: dSeq (int8)
+    for p in cur_particles {
+        let prev = prev_map.get(&p.id);
+        let prev_seq = prev.map_or(0u8, |pp| pp.seq_index);
+        let ds = (p.seq_index as i16 - prev_seq as i16).clamp(-128, 127) as i8;
+        buf.push(ds as u8);
+    }
+
+    // Particle IDs
+    for p in cur_particles {
+        let _ = buf.write_i32::<LittleEndian>(p.id);
+    }
+
+    buf
+}
+
+/// Write a complete NBL file using I/P frame compression.
+/// - `keyframe_interval`: number of frames between I-Frames (0 = all I-Frames).
+/// - `zstd_level`: Zstd compression level (1-5).
+pub fn save_file_compressed(
+    path: &PathBuf,
+    header: &NblHeader,
+    textures: &[TextureEntry],
+    frames: &[Vec<Particle>],
+    keyframe_interval: u32,
+    zstd_level: i32,
+) -> Result<()> {
+    let mut f = File::create(path)?;
+
+    // 1. Header (48 bytes)
+    f.write_all(MAGIC)?;
+    f.write_u16::<LittleEndian>(header.version)?;
+    f.write_u16::<LittleEndian>(header.target_fps)?;
+    f.write_u32::<LittleEndian>(frames.len() as u32)?;
+    f.write_u16::<LittleEndian>(textures.len() as u16)?;
+    f.write_u16::<LittleEndian>(header.attributes)?;
+    for v in &header.bbox_min {
+        f.write_f32::<LittleEndian>(*v)?;
+    }
+    for v in &header.bbox_max {
+        f.write_f32::<LittleEndian>(*v)?;
+    }
+    f.write_all(&[0u8; 4])?; // Reserved
+
+    // 2. Texture block
+    for tex in textures {
+        let path_bytes = tex.path.as_bytes();
+        f.write_u16::<LittleEndian>(path_bytes.len() as u16)?;
+        f.write_all(path_bytes)?;
+        f.write_u8(tex.rows)?;
+        f.write_u8(tex.cols)?;
+    }
+
+    // 3. Determine which frames are keyframes
+    let effective_interval = if keyframe_interval == 0 {
+        1
+    } else {
+        keyframe_interval
+    };
+    let mut keyframe_frame_indices: Vec<u32> = Vec::new();
+    for i in 0..frames.len() {
+        if (i as u32) % effective_interval == 0 {
+            keyframe_frame_indices.push(i as u32);
+        }
+    }
+
+    // 4. Encode all frames to compressed blobs
+    let mut compressed_blobs: Vec<Vec<u8>> = Vec::with_capacity(frames.len());
+    for (i, frame_particles) in frames.iter().enumerate() {
+        let is_keyframe = keyframe_frame_indices.contains(&(i as u32));
+        let raw = if is_keyframe || i == 0 {
+            encode_i_frame(frame_particles)
+        } else {
+            encode_p_frame(&frames[i - 1], frame_particles)
+        };
+        let compressed = zstd::encode_all(Cursor::new(&raw), zstd_level)?;
+        compressed_blobs.push(compressed);
+    }
+
+    // 5. Calculate offsets
+    let mut tex_block_size: usize = 0;
+    for tex in textures {
+        tex_block_size += 2 + tex.path.as_bytes().len() + 1 + 1;
+    }
+
+    let frame_index_table_size = frames.len() * 12;
+    let keyframe_count = keyframe_frame_indices.len();
+    let keyframe_index_table_size = 4 + keyframe_count * 4;
+
+    let data_start = 48 + tex_block_size + frame_index_table_size + keyframe_index_table_size;
+
+    let mut current_offset = data_start;
+    let mut index_entries: Vec<(u64, u32)> = Vec::with_capacity(frames.len());
+    for blob in &compressed_blobs {
+        index_entries.push((current_offset as u64, blob.len() as u32));
+        current_offset += blob.len();
+    }
+
+    // 6. Write Frame Index Table
+    for (offset, size) in &index_entries {
+        f.write_u64::<LittleEndian>(*offset)?;
+        f.write_u32::<LittleEndian>(*size)?;
+    }
+
+    // 7. Write Keyframe Index Table
+    f.write_u32::<LittleEndian>(keyframe_count as u32)?;
+    for &kf_idx in &keyframe_frame_indices {
+        f.write_u32::<LittleEndian>(kf_idx)?;
+    }
+
+    // 8. Write compressed frame data
+    for blob in &compressed_blobs {
+        f.write_all(blob)?;
+    }
+
+    f.flush()?;
+    Ok(())
+}

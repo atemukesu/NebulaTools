@@ -56,6 +56,7 @@ pub enum EditTool {
     Color,
     Transform,
     Trim,
+    Compress,
 }
 
 pub struct EditState {
@@ -75,6 +76,8 @@ pub struct EditState {
     pub status_msg: Option<String>,
     pub decoded_frames: Option<Vec<Vec<Particle>>>,
     pub edited_header: Option<NblHeader>,
+    pub compress_keyframe_interval: u32,
+    pub compress_zstd_level: i32,
 }
 
 impl Default for EditState {
@@ -96,6 +99,8 @@ impl Default for EditState {
             status_msg: None,
             decoded_frames: None,
             edited_header: None,
+            compress_keyframe_interval: 60,
+            compress_zstd_level: 3,
         }
     }
 }
@@ -382,6 +387,17 @@ impl NebulaToolsApp {
             overlay_pos,
             egui::Align2::LEFT_TOP,
             info_text,
+            egui::FontId::proportional(16.0),
+            egui::Color32::from_white_alpha(180),
+        );
+
+        // Particle count overlay (below FPS)
+        let particle_count = particles_data.len() / 8;
+        let particle_pos = rect.left_top() + egui::vec2(10.0, 30.0);
+        painter.text(
+            particle_pos,
+            egui::Align2::LEFT_TOP,
+            format!("Particles: {}", particle_count),
             egui::FontId::proportional(16.0),
             egui::Color32::from_white_alpha(180),
         );
