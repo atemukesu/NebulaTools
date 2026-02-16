@@ -136,10 +136,10 @@ impl NebulaToolsApp {
                         ui.add_space(8.0);
                         let entry_id = format!("pex_entry_{}", i);
                         egui::Frame::none()
-                            .fill(egui::Color32::from_gray(20))
+                            .fill(ui.visuals().faint_bg_color)
                             .inner_margin(10.0)
                             .rounding(8.0)
-                            .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(50)))
+                            .stroke(egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color))
                             .show(ui, |ui| {
                                 // Header row
                                 ui.horizontal(|ui| {
@@ -148,7 +148,7 @@ impl NebulaToolsApp {
                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                         if entry_count > 1 {
                                             if ui.small_button("🗑").on_hover_text("Remove").clicked() {
-                                                remove_idx = Some(i);
+                                                self.pex.confirm_delete = Some(i);
                                             }
                                         }
                                         if ui.small_button("⛶").on_hover_text("Fullscreen").clicked() {
@@ -205,9 +205,32 @@ impl NebulaToolsApp {
                             });
                     }
 
+                    // Delete confirmation dialog
+                    if let Some(idx) = self.pex.confirm_delete {
+                        egui::Window::new(self.i18n.tr("pex_confirm_delete_title"))
+                            .collapsible(false)
+                            .resizable(false)
+                            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                            .show(ctx, |ui| {
+                                ui.label(self.i18n.tr("pex_confirm_delete_msg"));
+                                ui.add_space(8.0);
+                                ui.horizontal(|ui| {
+                                    if ui.button(self.i18n.tr("yes")).clicked() {
+                                        remove_idx = Some(idx);
+                                        self.pex.confirm_delete = None;
+                                    }
+                                    if ui.button(self.i18n.tr("no")).clicked() {
+                                        self.pex.confirm_delete = None;
+                                    }
+                                });
+                            });
+                    }
+
                     // Remove entry
                     if let Some(idx) = remove_idx {
                         self.pex.entries.remove(idx);
+                        // Clear frames to force recompile
+                        self.pex.preview_frames = None;
                     }
 
                     // Add button

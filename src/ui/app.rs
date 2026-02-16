@@ -153,6 +153,7 @@ pub struct ParticleexState {
     pub status_msg: Option<String>,
     pub show_help: bool,
     pub fullscreen_entry: Option<usize>,
+    pub confirm_delete: Option<usize>,
 }
 
 impl Default for ParticleexState {
@@ -167,6 +168,7 @@ impl Default for ParticleexState {
             status_msg: None,
             show_help: false,
             fullscreen_entry: None,
+            confirm_delete: None,
         }
     }
 }

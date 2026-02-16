@@ -123,5 +123,8 @@
     "pex_position": "Position",
     "pex_duration": "Duration Override",
     "pex_add_command": "Add Command",
-    "pex_entries_count": "Entries"
+    "pex_entries_count": "Entries",
+    "pex_confirm_delete_title": "Confirm Deletion",
+    "pex_confirm_delete_msg": "Are you sure you want to delete this command?",
+    "cancel": "Cancel"
 }

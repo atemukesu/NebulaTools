@@ -123,5 +123,8 @@
     "pex_position": "位置偏移",
     "pex_duration": "时长覆盖",
     "pex_add_command": "添加命令",
-    "pex_entries_count": "命令条数"
+    "pex_entries_count": "命令条数",
+    "pex_confirm_delete_title": "确认删除",
+    "pex_confirm_delete_msg": "确定要删除这条命令吗？",
+    "cancel": "取消"
 }
