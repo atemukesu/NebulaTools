@@ -14,12 +14,12 @@ pub enum EmitterShape {
 }
 
 impl EmitterShape {
-    pub fn label(&self) -> &'static str {
+    pub fn i18n_key(&self) -> &'static str {
         match self {
-            Self::Point => "Point",
-            Self::Sphere => "Sphere",
-            Self::Box => "Box",
-            Self::Ring => "Ring",
+            Self::Point => "shape_point",
+            Self::Sphere => "shape_sphere",
+            Self::Box => "shape_box",
+            Self::Ring => "shape_ring",
         }
     }
 

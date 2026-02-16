@@ -94,5 +94,19 @@
     "anim_duration": "Duration",
     "target_fps_setting": "Target FPS",
     "generate_preview": "▶ Generate Preview",
-    "export_nbl": "💾 Export .nbl"
+    "export_nbl": "💾 Export .nbl",
+    "shape": "Shape",
+    "radius": "Radius",
+    "box_size": "Box Size",
+    "burst_only": "Burst Only",
+    "direction": "Direction",
+    "spread": "Spread",
+    "drag": "Drag",
+    "colors_and_size": "🎨 Colors & Size",
+    "animation_settings": "⏱ Animation Settings",
+    "grid": "Show Grid",
+    "shape_point": "Point",
+    "shape_sphere": "Sphere",
+    "shape_box": "Box",
+    "shape_ring": "Ring"
 }

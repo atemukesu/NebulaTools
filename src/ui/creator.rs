@@ -86,8 +86,8 @@ impl NebulaToolsApp {
                         .spacing([12.0, 6.0])
                         .show(ui, |ui| {
                             // Shape
-                            ui.label("Shape:");
-                            let shape_label = self.creator.config.shape.label();
+                            ui.label(format!("{}:", self.i18n.tr("shape")));
+                            let shape_label = self.i18n.tr(self.creator.config.shape.i18n_key());
                             egui::ComboBox::from_id_source("emitter_shape")
                                 .selected_text(shape_label)
                                 .show_ui(ui, |ui| {
@@ -95,7 +95,7 @@ impl NebulaToolsApp {
                                         ui.selectable_value(
                                             &mut self.creator.config.shape,
                                             s,
-                                            s.label(),
+                                            self.i18n.tr(s.i18n_key()),
                                         );
                                     }
                                 });
@@ -103,7 +103,7 @@ impl NebulaToolsApp {
 
                             match self.creator.config.shape {
                                 EmitterShape::Sphere | EmitterShape::Ring => {
-                                    ui.label("Radius:");
+                                    ui.label(format!("{}:", self.i18n.tr("radius")));
                                     ui.add(
                                         egui::DragValue::new(&mut self.creator.config.shape_radius)
                                             .clamp_range(0.01..=50.0)
@@ -113,7 +113,7 @@ impl NebulaToolsApp {
                                     ui.end_row();
                                 }
                                 EmitterShape::Box => {
-                                    ui.label("Box Size:");
+                                    ui.label(format!("{}:", self.i18n.tr("box_size")));
                                     ui.horizontal(|ui| {
                                         ui.add(
                                             egui::DragValue::new(
@@ -161,7 +161,10 @@ impl NebulaToolsApp {
                             ui.end_row();
 
                             ui.label("");
-                            ui.checkbox(&mut self.creator.config.burst_only, "Burst Only");
+                            ui.checkbox(
+                                &mut self.creator.config.burst_only,
+                                self.i18n.tr("burst_only"),
+                            );
                             ui.end_row();
 
                             // Lifetime
@@ -195,7 +198,7 @@ impl NebulaToolsApp {
                             ui.end_row();
 
                             // Direction
-                            ui.label("Direction:");
+                            ui.label(format!("{}:", self.i18n.tr("direction")));
                             ui.horizontal(|ui| {
                                 ui.add(
                                     egui::DragValue::new(&mut self.creator.config.direction[0])
@@ -215,7 +218,7 @@ impl NebulaToolsApp {
                             });
                             ui.end_row();
 
-                            ui.label("Spread:");
+                            ui.label(format!("{}:", self.i18n.tr("spread")));
                             ui.add(
                                 egui::DragValue::new(&mut self.creator.config.spread)
                                     .clamp_range(0.0..=180.0)
@@ -233,7 +236,7 @@ impl NebulaToolsApp {
                             );
                             ui.end_row();
 
-                            ui.label("Drag:");
+                            ui.label(format!("{}:", self.i18n.tr("drag")));
                             ui.add(
                                 egui::DragValue::new(&mut self.creator.config.drag)
                                     .clamp_range(0.0..=1.0)
@@ -247,7 +250,11 @@ impl NebulaToolsApp {
                     ui.separator();
 
                     // ===== Colors =====
-                    ui.label(egui::RichText::new("🎨 Colors / Size").strong().size(15.0));
+                    ui.label(
+                        egui::RichText::new(self.i18n.tr("colors_and_size"))
+                            .strong()
+                            .size(15.0),
+                    );
                     ui.add_space(4.0);
 
                     ui.horizontal(|ui| {
@@ -288,7 +295,11 @@ impl NebulaToolsApp {
                     ui.separator();
 
                     // ===== Animation settings =====
-                    ui.label(egui::RichText::new("⏱ Animation").strong().size(15.0));
+                    ui.label(
+                        egui::RichText::new(self.i18n.tr("animation_settings"))
+                            .strong()
+                            .size(15.0),
+                    );
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         ui.label(self.i18n.tr("target_fps_setting"));
@@ -395,7 +406,7 @@ impl NebulaToolsApp {
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
-                                    ui.checkbox(&mut self.show_grid, "Grid");
+                                    ui.checkbox(&mut self.show_grid, self.i18n.tr("grid"));
                                     ui.add_space(8.0);
                                     ui.label(format!("/ {}", max_frame));
                                     let mut f = self.creator.preview_frame_idx;

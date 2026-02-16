@@ -94,5 +94,19 @@
     "anim_duration": "动画时长",
     "target_fps_setting": "目标帧率",
     "generate_preview": "▶ 生成预览",
-    "export_nbl": "💾 导出 .nbl"
+    "export_nbl": "💾 导出 .nbl",
+    "shape": "形状",
+    "radius": "半径",
+    "box_size": "区域大小",
+    "burst_only": "仅单次爆发",
+    "direction": "方向",
+    "spread": "散布范围",
+    "drag": "空气阻力",
+    "colors_and_size": "🎨 颜色与大小",
+    "animation_settings": "⏱ 动画设置",
+    "grid": "显示网格",
+    "shape_point": "点",
+    "shape_sphere": "球体",
+    "shape_box": "立方体",
+    "shape_ring": "圆环"
 }
