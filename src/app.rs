@@ -1,8 +1,17 @@
 use crate::i18n::{tr, Language};
 use crate::player::PlayerState;
 use crate::renderer::ParticleRenderer;
-use eframe::{egui, egui_glow, glow};
+use eframe::{
+    egui, egui_glow,
+    glow::{self, HasContext},
+};
 use std::sync::{Arc, Mutex};
+
+#[derive(PartialEq, Eq, Clone, Copy)]
+pub enum AppMode {
+    Edit,
+    Preview,
+}
 
 pub struct CameraState {
     pub yaw: f32,
@@ -29,6 +38,7 @@ pub struct NebulaToolsApp {
     pub camera: CameraState,
     pub renderer: Arc<Mutex<Option<ParticleRenderer>>>,
     pub show_grid: bool,
+    pub mode: AppMode,
 }
 
 impl NebulaToolsApp {
@@ -41,6 +51,7 @@ impl NebulaToolsApp {
             camera: CameraState::default(),
             renderer: Arc::new(Mutex::new(None)),
             show_grid: true,
+            mode: AppMode::Preview,
         }
     }
 
@@ -59,11 +70,39 @@ impl NebulaToolsApp {
         }
         data
     }
+
+    fn handle_import(&mut self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("Nebula", &["nbl"])
+            .pick_file()
+        {
+            match self.player.load_file(path) {
+                Ok(_) => {
+                    self.error_msg = None;
+                    if let Some(h) = &self.player.header {
+                        self.camera.target = [
+                            (h.bbox_min[0] + h.bbox_max[0]) * 0.5,
+                            (h.bbox_min[1] + h.bbox_max[1]) * 0.5,
+                            (h.bbox_min[2] + h.bbox_max[2]) * 0.5,
+                        ];
+                    }
+                }
+                Err(e) => self.error_msg = Some(format!("Load Failed: {}", e)),
+            }
+        }
+    }
 }
 
 impl eframe::App for NebulaToolsApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if self.player.is_playing {
+        // 1. Welcome Screen (Early Return)
+        if self.player.header.is_none() {
+            self.show_welcome_screen(ctx);
+            return;
+        }
+
+        // 2. Playback Logic (Only in Preview)
+        if self.mode == AppMode::Preview && self.player.is_playing {
             if let Some(header) = &self.player.header {
                 let dt = ctx.input(|i| i.stable_dt);
                 self.player.frame_timer += dt;
@@ -72,42 +111,21 @@ impl eframe::App for NebulaToolsApp {
                     self.player.frame_timer -= frame_dur;
                     let next_frame = self.player.current_frame_idx + 1;
                     if (next_frame as u32) < header.total_frames {
-                        if let Err(e) = self.player.seek_to(next_frame as u32) {
-                            self.player.is_playing = false;
-                            self.error_msg = Some(format!("Playback Error: {}", e));
-                        }
+                        let _ = self.player.seek_to(next_frame as u32);
                     } else {
                         self.player.is_playing = false;
                     }
-                    ctx.request_repaint();
-                } else {
-                    ctx.request_repaint();
                 }
+                ctx.request_repaint();
             }
         }
 
+        // 3. Main GUI
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button(tr(self.lang, "file"), |ui| {
                     if ui.button(tr(self.lang, "import")).clicked() {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("Nebula", &["nbl"])
-                            .pick_file()
-                        {
-                            match self.player.load_file(path) {
-                                Ok(_) => {
-                                    self.error_msg = None;
-                                    if let Some(h) = &self.player.header {
-                                        self.camera.target = [
-                                            (h.bbox_min[0] + h.bbox_max[0]) * 0.5,
-                                            (h.bbox_min[1] + h.bbox_max[1]) * 0.5,
-                                            (h.bbox_min[2] + h.bbox_max[2]) * 0.5,
-                                        ];
-                                    }
-                                }
-                                Err(e) => self.error_msg = Some(format!("Load Failed: {}", e)),
-                            }
-                        }
+                        self.handle_import();
                         ui.close_menu();
                     }
                 });
@@ -130,79 +148,162 @@ impl eframe::App for NebulaToolsApp {
                 });
 
                 ui.separator();
-                ui.checkbox(&mut self.show_grid, "Grid");
+                ui.selectable_value(&mut self.mode, AppMode::Edit, tr(self.lang, "edit_mode"));
+                ui.selectable_value(
+                    &mut self.mode,
+                    AppMode::Preview,
+                    tr(self.lang, "preview_mode"),
+                );
+
+                if self.mode == AppMode::Preview {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.checkbox(&mut self.show_grid, "Grid");
+                    });
+                }
             });
         });
 
-        egui::SidePanel::left("left_panel")
-            .resizable(true)
-            .default_width(300.0)
-            .show(ctx, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    ui.add_space(8.0);
-                    if let Some(header) = self.player.header.clone() {
-                        ui.heading(tr(self.lang, "playback"));
-                        ui.horizontal(|ui| {
-                            let label = if self.player.is_playing {
-                                tr(self.lang, "pause")
-                            } else {
-                                tr(self.lang, "play")
-                            };
-                            if ui.button(label).clicked() {
-                                self.player.is_playing = !self.player.is_playing;
-                            }
-                            if ui.button(tr(self.lang, "stop")).clicked() {
-                                self.player.is_playing = false;
-                                let _ = self.player.seek_to(0);
-                            }
-                        });
+        if self.mode == AppMode::Preview {
+            self.show_preview_panels(ctx);
+        } else {
+            self.show_edit_panels(ctx);
+        }
+    }
 
-                        let mut frame = self.player.current_frame_idx.max(0) as u32;
-                        let max_frame = header.total_frames.saturating_sub(1);
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut frame, 0..=max_frame)
-                                    .text(tr(self.lang, "frame")),
-                            )
-                            .changed()
-                        {
-                            self.player.is_playing = false;
-                            let _ = self.player.seek_to(frame);
-                        }
-                        ui.label(format!(
-                            "{}: {}",
-                            tr(self.lang, "particle_count"),
-                            self.player.particles.len()
-                        ));
+    fn on_exit(&mut self, gl: Option<&glow::Context>) {
+        if let Some(gl) = gl {
+            if let Some(renderer) = self.renderer.lock().unwrap().take() {
+                renderer.destroy(gl);
+            }
+        }
+    }
+}
 
-                        ui.separator();
-                        ui.collapsing(tr(self.lang, "metadata"), |ui| {
-                            ui.label(format!("{}: {}", tr(self.lang, "version"), header.version));
-                            ui.label(format!("{}: {}", tr(self.lang, "fps"), header.target_fps));
-                            ui.label(format!(
-                                "{}: {}",
-                                tr(self.lang, "total_frames"),
-                                header.total_frames
-                            ));
-                        });
-                    } else {
-                        ui.label("No file loaded");
+impl NebulaToolsApp {
+    fn show_welcome_screen(&mut self, ctx: &egui::Context) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.add_space(ui.available_height() * 0.2);
+
+                ui.heading(
+                    egui::RichText::new(format!(
+                        "{} NebulaTools v{}",
+                        tr(self.lang, "welcome"),
+                        env!("CARGO_PKG_VERSION")
+                    ))
+                    .size(40.0)
+                    .strong(),
+                );
+
+                ui.add_space(40.0);
+
+                ui.horizontal(|ui| {
+                    ui.add_space((ui.available_width() - 420.0) / 2.0); // Simple center
+
+                    let btn_size = egui::vec2(200.0, 60.0);
+                    if ui
+                        .add_sized(
+                            btn_size,
+                            egui::Button::new(format!("📂 {}", tr(self.lang, "open_existing")))
+                                .rounding(8.0),
+                        )
+                        .clicked()
+                    {
+                        self.handle_import();
                     }
 
-                    if let Some(err) = &self.error_msg {
-                        ui.colored_label(egui::Color32::RED, err);
+                    ui.add_space(20.0);
+
+                    if ui
+                        .add_sized(
+                            btn_size,
+                            egui::Button::new(format!("✨ {}", tr(self.lang, "create_new")))
+                                .rounding(8.0),
+                        )
+                        .clicked()
+                    {
+                        // Create placeholder
                     }
                 });
+
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                    ui.add_space(20.0);
+                    ui.colored_label(
+                        egui::Color32::GRAY,
+                        format!("{}: Atemukesu", tr(self.lang, "author")),
+                    );
+                });
+            });
+        });
+    }
+
+    fn show_preview_panels(&mut self, ctx: &egui::Context) {
+        egui::SidePanel::left("preview_side")
+            .resizable(true)
+            .min_width(300.0)
+            .show(ctx, |ui| {
+                ui.add_space(8.0);
+                if let Some(header) = self.player.header.clone() {
+                    ui.heading(tr(self.lang, "playback"));
+                    ui.horizontal(|ui| {
+                        let label = if self.player.is_playing {
+                            tr(self.lang, "pause")
+                        } else {
+                            tr(self.lang, "play")
+                        };
+                        if ui.button(label).clicked() {
+                            self.player.is_playing = !self.player.is_playing;
+                        }
+                        if ui.button(tr(self.lang, "stop")).clicked() {
+                            self.player.is_playing = false;
+                            let _ = self.player.seek_to(0);
+                        }
+                    });
+
+                    let mut frame = self.player.current_frame_idx.max(0) as u32;
+                    let max_frame = header.total_frames.saturating_sub(1);
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut frame, 0..=max_frame)
+                                .text(tr(self.lang, "frame")),
+                        )
+                        .changed()
+                    {
+                        self.player.is_playing = false;
+                        let _ = self.player.seek_to(frame);
+                    }
+                    ui.label(format!(
+                        "{}: {}",
+                        tr(self.lang, "particle_count"),
+                        self.player.particles.len()
+                    ));
+
+                    ui.separator();
+                    ui.collapsing(tr(self.lang, "metadata"), |ui| {
+                        ui.label(format!("{}: {}", tr(self.lang, "version"), header.version));
+                        ui.label(format!("{}: {}", tr(self.lang, "fps"), header.target_fps));
+                        ui.label(format!(
+                            "{}: {}",
+                            tr(self.lang, "total_frames"),
+                            header.total_frames
+                        ));
+                    });
+                }
+
+                if let Some(err) = &self.error_msg {
+                    ui.colored_label(egui::Color32::RED, err);
+                }
             });
 
         egui::CentralPanel::default().show(ctx, |ui| {
             let (rect, response) =
                 ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
 
+            // Camera interaction (Pitch fixed)
             if response.dragged_by(egui::PointerButton::Primary) {
                 let delta = response.drag_delta();
-                self.camera.yaw += delta.x * 0.01;
-                self.camera.pitch += delta.y * 0.01;
+                self.camera.yaw -= delta.x * 0.01;
+                self.camera.pitch += delta.y * 0.01; // Up/Down habit fix
                 self.camera.pitch = self.camera.pitch.clamp(-1.5, 1.5);
             }
             if response.hovered() {
@@ -226,11 +327,13 @@ impl eframe::App for NebulaToolsApp {
                     let px_height = rect_height * info.pixels_per_point;
                     let scaling = px_height * 1.2;
                     unsafe {
+                        painter.gl().clear_color(0.0, 0.0, 0.0, 1.0);
                         renderer.paint(painter.gl(), mvp, &particles_data, scaling, show_grid);
                     }
                 }
             });
 
+            ui.painter().rect_filled(rect, 0.0, egui::Color32::BLACK);
             ui.painter().add(egui::PaintCallback {
                 rect,
                 callback: Arc::new(callback),
@@ -251,16 +354,26 @@ impl eframe::App for NebulaToolsApp {
         });
     }
 
-    fn on_exit(&mut self, gl: Option<&glow::Context>) {
-        if let Some(gl) = gl {
-            if let Some(renderer) = self.renderer.lock().unwrap().take() {
-                renderer.destroy(gl);
-            }
-        }
-    }
-}
+    fn show_edit_panels(&mut self, ctx: &egui::Context) {
+        egui::SidePanel::left("edit_side")
+            .resizable(true)
+            .min_width(320.0)
+            .show(ctx, |ui| {
+                ui.heading(tr(self.lang, "edit_mode"));
+                ui.separator();
+                ui.label("Components Properties");
+                // Placeholder for future properties
+            });
 
-impl NebulaToolsApp {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.centered_and_justified(|ui| {
+                ui.heading("Editing Canvas (WIP)");
+                ui.label("Visual editing environment will appear here.");
+            });
+        });
+        // Rendering is skipped here, significantly reducing GPU usage
+    }
+
     fn calculate_mvp(&self, aspect: f32) -> [f32; 16] {
         let view = self.calculate_view_matrix();
         let proj = self.calculate_projection_matrix(aspect);
@@ -272,7 +385,6 @@ impl NebulaToolsApp {
         let sin_p = self.camera.pitch.sin();
         let cos_y = self.camera.yaw.cos();
         let sin_y = self.camera.yaw.sin();
-
         let eye = [
             self.camera.target[0] + self.camera.distance * cos_p * sin_y,
             self.camera.target[1] + self.camera.distance * sin_p,

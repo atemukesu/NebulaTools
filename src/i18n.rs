@@ -4,6 +4,7 @@ pub enum Language {
     English,
 }
 
+#[allow(dead_code)]
 impl Language {
     pub fn display_name(&self) -> &'static str {
         match self {
@@ -43,6 +44,12 @@ pub fn tr(lang: Language, key: &str) -> &'static str {
             "has_size" => "包含大小信息",
             "duration" => "时长",
             "keyframe_count" => "关键帧数",
+            "open_existing" => "打开现有",
+            "create_new" => "创建新的",
+            "edit_mode" => "编辑",
+            "preview_mode" => "预览",
+            "author" => "作者",
+            "welcome" => "欢迎使用",
             _ => "Unknown",
         },
         Language::English => match key {
@@ -73,6 +80,12 @@ pub fn tr(lang: Language, key: &str) -> &'static str {
             "has_size" => "Has Size",
             "duration" => "Duration",
             "keyframe_count" => "Keyframes",
+            "open_existing" => "Open Existing",
+            "create_new" => "Create New",
+            "edit_mode" => "Edit",
+            "preview_mode" => "Preview",
+            "author" => "Author",
+            "welcome" => "Welcome to",
             _ => "Unknown",
         },
     }

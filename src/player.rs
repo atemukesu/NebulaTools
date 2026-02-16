@@ -7,6 +7,7 @@ use std::path::PathBuf;
 
 const MAGIC: &[u8; 8] = b"NEBULAFX";
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct NblHeader {
     pub version: u16,
@@ -18,6 +19,7 @@ pub struct NblHeader {
     pub bbox_max: [f32; 3],
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct TextureEntry {
     pub path: String,
@@ -25,6 +27,7 @@ pub struct TextureEntry {
     pub cols: u8,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Particle {
     pub id: i32,

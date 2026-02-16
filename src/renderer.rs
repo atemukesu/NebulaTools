@@ -24,7 +24,8 @@ impl ParticleRenderer {
                 out vec4 v_color;
                 void main() {
                     gl_Position = u_mvp * vec4(a_pos, 1.0);
-                    gl_PointSize = (a_size * u_scaling) / gl_Position.w;
+                    // 核心修复：确保计算出的点大小至少为 1.2 像素
+                    gl_PointSize = max((a_size * u_scaling) / gl_Position.w, 1.2);
                     v_color = a_color;
                 }"#,
                 r#"#version 330 core
