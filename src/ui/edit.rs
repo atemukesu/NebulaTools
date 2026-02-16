@@ -3,6 +3,11 @@ use crate::player;
 use eframe::egui;
 use std::sync::{Arc, Mutex};
 
+/// Accent color for labels and highlights in the edit panel
+const ACCENT: egui::Color32 = egui::Color32::from_rgb(120, 180, 255);
+const HINT_COLOR: egui::Color32 = egui::Color32::from_rgb(160, 160, 180);
+const PREVIEW_COLOR: egui::Color32 = egui::Color32::from_rgb(100, 220, 160);
+
 impl NebulaToolsApp {
     pub(crate) fn show_edit_workflow(&mut self, ctx: &egui::Context) {
         // Set up header info without decoding all frames (lazy decode)
@@ -71,7 +76,7 @@ impl NebulaToolsApp {
                 return;
             }
 
-            ui.vertical(|ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
                 // Header of the selected tool
                 let title = match self.edit.selected_tool {
                     crate::ui::app::EditTool::Speed => self.i18n.tr("edit_anim_speed"),
@@ -81,10 +86,10 @@ impl NebulaToolsApp {
                     crate::ui::app::EditTool::Trim => self.i18n.tr("edit_trim"),
                     crate::ui::app::EditTool::Compress => self.i18n.tr("edit_compress"),
                 };
-                ui.heading(egui::RichText::new(title).size(24.0).strong());
-                ui.add_space(10.0);
+                ui.label(egui::RichText::new(title).size(26.0).strong().color(ACCENT));
+                ui.add_space(6.0);
                 ui.separator();
-                ui.add_space(10.0);
+                ui.add_space(12.0);
 
                 // Parameters view
                 egui::Frame::none()
@@ -100,7 +105,7 @@ impl NebulaToolsApp {
                         crate::ui::app::EditTool::Compress => self.ui_compress_params(ui),
                     });
 
-                ui.add_space(20.0);
+                ui.add_space(16.0);
 
                 // Status message
                 if let Some(ref msg) = self.edit.status_msg {
@@ -109,16 +114,21 @@ impl NebulaToolsApp {
                     } else {
                         egui::Color32::from_rgb(255, 100, 100)
                     };
-                    ui.colored_label(color, msg);
-                    ui.add_space(10.0);
+                    ui.colored_label(color, egui::RichText::new(msg).size(14.0));
+                    ui.add_space(8.0);
                 }
 
                 ui.separator();
-                ui.add_space(10.0);
+                ui.add_space(8.0);
 
                 // Summary stats
-                ui.heading(self.i18n.tr("metadata"));
-                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new(self.i18n.tr("metadata"))
+                        .size(18.0)
+                        .strong()
+                        .color(ACCENT),
+                );
+                ui.add_space(6.0);
 
                 if let Some(ref header) = self.edit.edited_header {
                     let frame_count = self
@@ -135,26 +145,30 @@ impl NebulaToolsApp {
 
                     egui::Grid::new("edit_summary_grid")
                         .num_columns(2)
-                        .spacing([40.0, 10.0])
+                        .spacing([20.0, 6.0])
                         .show(ui, |ui| {
-                            ui.label(self.i18n.tr("fps"));
+                            ui.label(egui::RichText::new(self.i18n.tr("fps")).color(HINT_COLOR));
                             ui.label(
                                 egui::RichText::new(format!("{}", header.target_fps)).strong(),
                             );
                             ui.end_row();
 
-                            ui.label(self.i18n.tr("total_frames"));
+                            ui.label(
+                                egui::RichText::new(self.i18n.tr("total_frames")).color(HINT_COLOR),
+                            );
                             ui.label(egui::RichText::new(format!("{}", frame_count)).strong());
                             ui.end_row();
 
-                            ui.label(self.i18n.tr("duration"));
+                            ui.label(
+                                egui::RichText::new(self.i18n.tr("duration")).color(HINT_COLOR),
+                            );
                             ui.label(egui::RichText::new(format!("{:.2} s", duration)).strong());
                             ui.end_row();
 
-                            ui.label(self.i18n.tr("bbox"));
+                            ui.label(egui::RichText::new(self.i18n.tr("bbox")).color(HINT_COLOR));
                             ui.label(
                                 egui::RichText::new(format!(
-                                    "({:.1},{:.1},{:.1}) -> ({:.1},{:.1},{:.1})",
+                                    "({:.1},{:.1},{:.1}) → ({:.1},{:.1},{:.1})",
                                     header.bbox_min[0],
                                     header.bbox_min[1],
                                     header.bbox_min[2],
@@ -172,86 +186,206 @@ impl NebulaToolsApp {
     }
 
     fn ui_speed_params(&mut self, ui: &mut egui::Ui) {
-        ui.label(egui::RichText::new(self.i18n.tr("edit_anim_speed_desc")).weak());
+        ui.label(
+            egui::RichText::new(self.i18n.tr("edit_anim_speed_desc"))
+                .color(HINT_COLOR)
+                .size(14.0),
+        );
+        ui.add_space(16.0);
+
+        // Get current frame info for preview calculations
+        let current_fps = self
+            .edit
+            .edited_header
+            .as_ref()
+            .map(|h| h.target_fps)
+            .unwrap_or(30);
+        let current_frame_count = self
+            .edit
+            .decoded_frames
+            .as_ref()
+            .map(|f| f.len())
+            .unwrap_or(
+                self.edit
+                    .edited_header
+                    .as_ref()
+                    .map(|h| h.total_frames as usize)
+                    .unwrap_or(0),
+            );
+
+        // ── Mode 0: FPS Only ──
+        let mode0_selected = self.edit.speed_mode == 0;
+        ui.horizontal(|ui| {
+            ui.radio_value(&mut self.edit.speed_mode, 0, "");
+            ui.label(
+                egui::RichText::new(self.i18n.tr("speed_mode_fps_only"))
+                    .strong()
+                    .size(15.0),
+            );
+        });
+        ui.indent("speed_mode_0_body", |ui| {
+            ui.label(
+                egui::RichText::new(self.i18n.tr("speed_mode_fps_only_desc"))
+                    .color(HINT_COLOR)
+                    .size(12.0),
+            );
+            ui.add_space(6.0);
+            ui.set_enabled(mode0_selected);
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("FPS:").strong());
+                ui.add(
+                    egui::DragValue::new(&mut self.edit.new_fps)
+                        .clamp_range(1..=240)
+                        .speed(1.0),
+                );
+            });
+            // Duration preview
+            if current_frame_count > 0 && mode0_selected {
+                let old_duration = if current_fps > 0 {
+                    current_frame_count as f32 / current_fps as f32
+                } else {
+                    0.0
+                };
+                let new_duration = if self.edit.new_fps > 0 {
+                    current_frame_count as f32 / self.edit.new_fps as f32
+                } else {
+                    0.0
+                };
+                ui.label(
+                    egui::RichText::new(format!(
+                        "⏱ {:.2}s → {:.2}s  ({} {})",
+                        old_duration,
+                        new_duration,
+                        current_frame_count,
+                        self.i18n.tr("frame")
+                    ))
+                    .color(PREVIEW_COLOR)
+                    .size(12.0),
+                );
+            }
+        });
+
         ui.add_space(12.0);
 
-        egui::Grid::new("speed_grid")
-            .num_columns(2)
-            .spacing([12.0, 8.0])
-            .show(ui, |ui| {
-                ui.radio_value(
-                    &mut self.edit.speed_mode,
-                    0,
-                    self.i18n.tr("speed_mode_fps_only"),
+        // ── Mode 1: Interpolate ──
+        let mode1_selected = self.edit.speed_mode == 1;
+        ui.horizontal(|ui| {
+            ui.radio_value(&mut self.edit.speed_mode, 1, "");
+            ui.label(
+                egui::RichText::new(self.i18n.tr("speed_mode_interp"))
+                    .strong()
+                    .size(15.0),
+            );
+        });
+        ui.indent("speed_mode_1_body", |ui| {
+            ui.label(
+                egui::RichText::new(self.i18n.tr("speed_mode_interp_desc"))
+                    .color(HINT_COLOR)
+                    .size(12.0),
+            );
+            ui.add_space(6.0);
+            ui.set_enabled(mode1_selected);
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("×").strong());
+                ui.add(
+                    egui::DragValue::new(&mut self.edit.speed_factor)
+                        .clamp_range(0.1..=10.0)
+                        .speed(0.05)
+                        .fixed_decimals(2),
                 );
-                ui.vertical(|ui| {
-                    ui.add(
-                        egui::DragValue::new(&mut self.edit.new_fps)
-                            .clamp_range(1..=240)
-                            .speed(1.0)
-                            .suffix(" FPS"),
-                    );
-                    ui.label(
-                        egui::RichText::new(self.i18n.tr("speed_mode_fps_only_desc"))
-                            .small()
-                            .weak(),
-                    );
-                });
-                ui.end_row();
-
-                ui.radio_value(
-                    &mut self.edit.speed_mode,
-                    1,
-                    self.i18n.tr("speed_mode_interp"),
-                );
-                ui.vertical(|ui| {
-                    ui.add(
-                        egui::DragValue::new(&mut self.edit.speed_factor)
-                            .clamp_range(0.1..=10.0)
-                            .speed(0.05)
-                            .fixed_decimals(2)
-                            .prefix("x "),
-                    );
-                    ui.label(
-                        egui::RichText::new(self.i18n.tr("speed_mode_interp_desc"))
-                            .small()
-                            .weak(),
-                    );
-                    if let Some(ref frames) = self.edit.decoded_frames {
-                        let new_count =
-                            ((frames.len() as f32) / self.edit.speed_factor).round() as usize;
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "{} → {} {}",
-                                frames.len(),
-                                new_count,
-                                self.i18n.tr("frame")
-                            ))
-                            .small()
-                            .weak(),
-                        );
-                    }
-                });
-                ui.end_row();
-
-                ui.radio_value(
-                    &mut self.edit.speed_mode,
-                    2,
-                    self.i18n.tr("speed_mode_both"),
-                );
-                ui.vertical(|ui| {
-                    ui.label(
-                        egui::RichText::new(self.i18n.tr("speed_mode_both_desc"))
-                            .small()
-                            .weak(),
-                    );
-                });
-                ui.end_row();
             });
+            if current_frame_count > 0 && mode1_selected {
+                let new_count =
+                    ((current_frame_count as f32) / self.edit.speed_factor).round() as usize;
+                let new_duration = if current_fps > 0 {
+                    new_count as f32 / current_fps as f32
+                } else {
+                    0.0
+                };
+                ui.label(
+                    egui::RichText::new(format!(
+                        "🎞 {} → {} {}  (⏱ {:.2}s)",
+                        current_frame_count,
+                        new_count,
+                        self.i18n.tr("frame"),
+                        new_duration
+                    ))
+                    .color(PREVIEW_COLOR)
+                    .size(12.0),
+                );
+            }
+        });
 
-        ui.add_space(16.0);
+        ui.add_space(12.0);
+
+        // ── Mode 2: Both ──
+        let mode2_selected = self.edit.speed_mode == 2;
+        ui.horizontal(|ui| {
+            ui.radio_value(&mut self.edit.speed_mode, 2, "");
+            ui.label(
+                egui::RichText::new(self.i18n.tr("speed_mode_both"))
+                    .strong()
+                    .size(15.0),
+            );
+        });
+        ui.indent("speed_mode_2_body", |ui| {
+            ui.label(
+                egui::RichText::new(self.i18n.tr("speed_mode_both_desc"))
+                    .color(HINT_COLOR)
+                    .size(12.0),
+            );
+            ui.add_space(6.0);
+            ui.set_enabled(mode2_selected);
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("FPS:").strong());
+                ui.add(
+                    egui::DragValue::new(&mut self.edit.new_fps)
+                        .clamp_range(1..=240)
+                        .speed(1.0),
+                );
+                ui.add_space(12.0);
+                ui.label(egui::RichText::new("×").strong());
+                ui.add(
+                    egui::DragValue::new(&mut self.edit.speed_factor)
+                        .clamp_range(0.1..=10.0)
+                        .speed(0.05)
+                        .fixed_decimals(2),
+                );
+            });
+            if current_frame_count > 0 && mode2_selected {
+                let new_count =
+                    ((current_frame_count as f32) / self.edit.speed_factor).round() as usize;
+                let new_duration = if self.edit.new_fps > 0 {
+                    new_count as f32 / self.edit.new_fps as f32
+                } else {
+                    0.0
+                };
+                ui.label(
+                    egui::RichText::new(format!(
+                        "🎞 {} → {} {}  |  FPS {} → {}  |  ⏱ {:.2}s",
+                        current_frame_count,
+                        new_count,
+                        self.i18n.tr("frame"),
+                        current_fps,
+                        self.edit.new_fps,
+                        new_duration
+                    ))
+                    .color(PREVIEW_COLOR)
+                    .size(12.0),
+                );
+            }
+        });
+
+        ui.add_space(20.0);
         if ui
-            .button(egui::RichText::new(format!("▶ {}", self.i18n.tr("apply"))).strong())
+            .add_sized(
+                [ui.available_width().min(200.0), 32.0],
+                egui::Button::new(
+                    egui::RichText::new(format!("▶ {}", self.i18n.tr("apply")))
+                        .strong()
+                        .size(15.0),
+                ),
+            )
             .clicked()
         {
             self.apply_speed_edit();
@@ -259,53 +393,83 @@ impl NebulaToolsApp {
     }
 
     fn ui_size_params(&mut self, ui: &mut egui::Ui) {
-        ui.label(egui::RichText::new(self.i18n.tr("edit_particle_size_desc")).weak());
+        ui.label(
+            egui::RichText::new(self.i18n.tr("edit_particle_size_desc"))
+                .color(HINT_COLOR)
+                .size(14.0),
+        );
+        ui.add_space(16.0);
+
+        // ── Scale ──
+        let scale_selected = self.edit.size_mode == 0;
+        ui.horizontal(|ui| {
+            ui.radio_value(&mut self.edit.size_mode, 0, "");
+            ui.label(
+                egui::RichText::new(self.i18n.tr("size_mode_scale"))
+                    .strong()
+                    .size(15.0),
+            );
+        });
+        ui.indent("size_mode_0_body", |ui| {
+            ui.label(
+                egui::RichText::new(self.i18n.tr("size_mode_scale_desc"))
+                    .color(HINT_COLOR)
+                    .size(12.0),
+            );
+            ui.add_space(6.0);
+            ui.set_enabled(scale_selected);
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("×").strong());
+                ui.add(
+                    egui::DragValue::new(&mut self.edit.size_scale)
+                        .clamp_range(0.01..=100.0)
+                        .speed(0.05)
+                        .fixed_decimals(2),
+                );
+            });
+        });
+
         ui.add_space(12.0);
 
-        egui::Grid::new("size_grid")
-            .num_columns(2)
-            .spacing([12.0, 8.0])
-            .show(ui, |ui| {
-                ui.radio_value(&mut self.edit.size_mode, 0, self.i18n.tr("size_mode_scale"));
-                ui.vertical(|ui| {
-                    ui.add(
-                        egui::DragValue::new(&mut self.edit.size_scale)
-                            .clamp_range(0.01..=100.0)
-                            .speed(0.05)
-                            .fixed_decimals(2),
-                    );
-                    ui.label(
-                        egui::RichText::new(self.i18n.tr("size_mode_scale_desc"))
-                            .small()
-                            .weak(),
-                    );
-                });
-                ui.end_row();
-
-                ui.radio_value(
-                    &mut self.edit.size_mode,
-                    1,
-                    self.i18n.tr("size_mode_uniform"),
+        // ── Uniform ──
+        let uniform_selected = self.edit.size_mode == 1;
+        ui.horizontal(|ui| {
+            ui.radio_value(&mut self.edit.size_mode, 1, "");
+            ui.label(
+                egui::RichText::new(self.i18n.tr("size_mode_uniform"))
+                    .strong()
+                    .size(15.0),
+            );
+        });
+        ui.indent("size_mode_1_body", |ui| {
+            ui.label(
+                egui::RichText::new(self.i18n.tr("size_mode_uniform_desc"))
+                    .color(HINT_COLOR)
+                    .size(12.0),
+            );
+            ui.add_space(6.0);
+            ui.set_enabled(uniform_selected);
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("=").strong());
+                ui.add(
+                    egui::DragValue::new(&mut self.edit.size_uniform)
+                        .clamp_range(0.0..=655.0)
+                        .speed(0.01)
+                        .fixed_decimals(2),
                 );
-                ui.vertical(|ui| {
-                    ui.add(
-                        egui::DragValue::new(&mut self.edit.size_uniform)
-                            .clamp_range(0.0..=655.0)
-                            .speed(0.01)
-                            .fixed_decimals(2),
-                    );
-                    ui.label(
-                        egui::RichText::new(self.i18n.tr("size_mode_uniform_desc"))
-                            .small()
-                            .weak(),
-                    );
-                });
-                ui.end_row();
             });
+        });
 
-        ui.add_space(16.0);
+        ui.add_space(20.0);
         if ui
-            .button(egui::RichText::new(format!("▶ {}", self.i18n.tr("apply"))).strong())
+            .add_sized(
+                [ui.available_width().min(200.0), 32.0],
+                egui::Button::new(
+                    egui::RichText::new(format!("▶ {}", self.i18n.tr("apply")))
+                        .strong()
+                        .size(15.0),
+                ),
+            )
             .clicked()
         {
             self.apply_size_edit();
@@ -313,14 +477,18 @@ impl NebulaToolsApp {
     }
 
     fn ui_color_params(&mut self, ui: &mut egui::Ui) {
-        ui.label(egui::RichText::new(self.i18n.tr("edit_color_desc")).weak());
-        ui.add_space(12.0);
+        ui.label(
+            egui::RichText::new(self.i18n.tr("edit_color_desc"))
+                .color(HINT_COLOR)
+                .size(14.0),
+        );
+        ui.add_space(16.0);
 
         egui::Grid::new("color_grid")
             .num_columns(2)
-            .spacing([12.0, 10.0])
+            .spacing([16.0, 12.0])
             .show(ui, |ui| {
-                ui.label(self.i18n.tr("brightness_factor"));
+                ui.label(egui::RichText::new(self.i18n.tr("brightness_factor")).strong());
                 ui.add(
                     egui::DragValue::new(&mut self.edit.brightness)
                         .clamp_range(0.0..=5.0)
@@ -329,7 +497,7 @@ impl NebulaToolsApp {
                 );
                 ui.end_row();
 
-                ui.label(self.i18n.tr("opacity_factor"));
+                ui.label(egui::RichText::new(self.i18n.tr("opacity_factor")).strong());
                 ui.add(
                     egui::DragValue::new(&mut self.edit.opacity)
                         .clamp_range(0.0..=5.0)
@@ -339,9 +507,16 @@ impl NebulaToolsApp {
                 ui.end_row();
             });
 
-        ui.add_space(16.0);
+        ui.add_space(20.0);
         if ui
-            .button(egui::RichText::new(format!("▶ {}", self.i18n.tr("apply"))).strong())
+            .add_sized(
+                [ui.available_width().min(200.0), 32.0],
+                egui::Button::new(
+                    egui::RichText::new(format!("▶ {}", self.i18n.tr("apply")))
+                        .strong()
+                        .size(15.0),
+                ),
+            )
             .clicked()
         {
             self.apply_color_edit();
@@ -349,14 +524,18 @@ impl NebulaToolsApp {
     }
 
     fn ui_transform_params(&mut self, ui: &mut egui::Ui) {
-        ui.label(egui::RichText::new(self.i18n.tr("edit_transform_desc")).weak());
-        ui.add_space(12.0);
+        ui.label(
+            egui::RichText::new(self.i18n.tr("edit_transform_desc"))
+                .color(HINT_COLOR)
+                .size(14.0),
+        );
+        ui.add_space(16.0);
 
         egui::Grid::new("transform_grid")
             .num_columns(2)
-            .spacing([12.0, 10.0])
+            .spacing([16.0, 12.0])
             .show(ui, |ui| {
-                ui.label(self.i18n.tr("translate_offset"));
+                ui.label(egui::RichText::new(self.i18n.tr("translate_offset")).strong());
                 ui.horizontal(|ui| {
                     ui.label("X:");
                     ui.add(egui::DragValue::new(&mut self.edit.translate[0]).speed(0.1));
@@ -367,7 +546,7 @@ impl NebulaToolsApp {
                 });
                 ui.end_row();
 
-                ui.label(self.i18n.tr("position_scale"));
+                ui.label(egui::RichText::new(self.i18n.tr("position_scale")).strong());
                 ui.add(
                     egui::DragValue::new(&mut self.edit.pos_scale)
                         .clamp_range(0.01..=100.0)
@@ -377,9 +556,16 @@ impl NebulaToolsApp {
                 ui.end_row();
             });
 
-        ui.add_space(16.0);
+        ui.add_space(20.0);
         if ui
-            .button(egui::RichText::new(format!("▶ {}", self.i18n.tr("apply"))).strong())
+            .add_sized(
+                [ui.available_width().min(200.0), 32.0],
+                egui::Button::new(
+                    egui::RichText::new(format!("▶ {}", self.i18n.tr("apply")))
+                        .strong()
+                        .size(15.0),
+                ),
+            )
             .clicked()
         {
             self.apply_transform_edit();
@@ -387,8 +573,12 @@ impl NebulaToolsApp {
     }
 
     fn ui_trim_params(&mut self, ui: &mut egui::Ui) {
-        ui.label(egui::RichText::new(self.i18n.tr("edit_trim_desc")).weak());
-        ui.add_space(12.0);
+        ui.label(
+            egui::RichText::new(self.i18n.tr("edit_trim_desc"))
+                .color(HINT_COLOR)
+                .size(14.0),
+        );
+        ui.add_space(16.0);
 
         let max_frame = self
             .edit
@@ -405,9 +595,9 @@ impl NebulaToolsApp {
 
         egui::Grid::new("trim_grid")
             .num_columns(2)
-            .spacing([12.0, 10.0])
+            .spacing([16.0, 12.0])
             .show(ui, |ui| {
-                ui.label(self.i18n.tr("trim_start"));
+                ui.label(egui::RichText::new(self.i18n.tr("trim_start")).strong());
                 ui.add(
                     egui::DragValue::new(&mut self.edit.trim_start)
                         .clamp_range(0..=max_frame)
@@ -415,7 +605,7 @@ impl NebulaToolsApp {
                 );
                 ui.end_row();
 
-                ui.label(self.i18n.tr("trim_end"));
+                ui.label(egui::RichText::new(self.i18n.tr("trim_end")).strong());
                 ui.add(
                     egui::DragValue::new(&mut self.edit.trim_end)
                         .clamp_range(0..=max_frame)
@@ -428,15 +618,40 @@ impl NebulaToolsApp {
         let end = (self.edit.trim_end as usize).min(max_frame as usize);
         if end >= start {
             ui.add_space(8.0);
+            let result_count = end - start + 1;
+            let fps = self
+                .edit
+                .edited_header
+                .as_ref()
+                .map(|h| h.target_fps)
+                .unwrap_or(30);
+            let duration = if fps > 0 {
+                result_count as f32 / fps as f32
+            } else {
+                0.0
+            };
             ui.label(
-                egui::RichText::new(format!("→ {} {}", end - start + 1, self.i18n.tr("frame")))
-                    .weak(),
+                egui::RichText::new(format!(
+                    "🎞 {} {}  (⏱ {:.2}s)",
+                    result_count,
+                    self.i18n.tr("frame"),
+                    duration
+                ))
+                .color(PREVIEW_COLOR)
+                .size(13.0),
             );
         }
 
-        ui.add_space(16.0);
+        ui.add_space(20.0);
         if ui
-            .button(egui::RichText::new(format!("▶ {}", self.i18n.tr("apply"))).strong())
+            .add_sized(
+                [ui.available_width().min(200.0), 32.0],
+                egui::Button::new(
+                    egui::RichText::new(format!("▶ {}", self.i18n.tr("apply")))
+                        .strong()
+                        .size(15.0),
+                ),
+            )
             .clicked()
         {
             self.apply_trim_edit();
@@ -620,7 +835,8 @@ impl NebulaToolsApp {
                 ui.label(
                     egui::RichText::new(self.i18n.tr("compress_progress"))
                         .strong()
-                        .size(18.0),
+                        .size(18.0)
+                        .color(ACCENT),
                 );
                 ui.add_space(8.0);
 
@@ -641,7 +857,8 @@ impl NebulaToolsApp {
                             "ETA: {:.0}s  |  Elapsed: {:.0}s  |  {:.0} frames/s",
                             remaining, elapsed, rate
                         ))
-                        .weak(),
+                        .color(HINT_COLOR)
+                        .size(13.0),
                     );
                 }
 
@@ -669,20 +886,25 @@ impl NebulaToolsApp {
             ui.label(
                 egui::RichText::new(self.i18n.tr("compress_warning"))
                     .color(egui::Color32::from_rgb(255, 200, 50))
-                    .strong(),
+                    .strong()
+                    .size(14.0),
             );
         });
-        ui.add_space(8.0);
+        ui.add_space(10.0);
 
-        ui.label(egui::RichText::new(self.i18n.tr("edit_compress_desc")).weak());
-        ui.add_space(12.0);
+        ui.label(
+            egui::RichText::new(self.i18n.tr("edit_compress_desc"))
+                .color(HINT_COLOR)
+                .size(13.0),
+        );
+        ui.add_space(16.0);
 
         egui::Grid::new("compress_grid")
             .num_columns(2)
-            .spacing([12.0, 10.0])
+            .spacing([16.0, 14.0])
             .show(ui, |ui| {
                 // Keyframe interval
-                ui.label(self.i18n.tr("compress_keyframe_interval"));
+                ui.label(egui::RichText::new(self.i18n.tr("compress_keyframe_interval")).strong());
                 ui.vertical(|ui| {
                     ui.add(
                         egui::DragValue::new(&mut self.edit.compress_keyframe_interval)
@@ -691,14 +913,14 @@ impl NebulaToolsApp {
                     );
                     ui.label(
                         egui::RichText::new(self.i18n.tr("compress_keyframe_interval_desc"))
-                            .small()
-                            .weak(),
+                            .color(HINT_COLOR)
+                            .size(11.0),
                     );
                 });
                 ui.end_row();
 
                 // Zstd level
-                ui.label(self.i18n.tr("compress_zstd_level"));
+                ui.label(egui::RichText::new(self.i18n.tr("compress_zstd_level")).strong());
                 ui.vertical(|ui| {
                     ui.add(
                         egui::DragValue::new(&mut self.edit.compress_zstd_level)
@@ -707,16 +929,23 @@ impl NebulaToolsApp {
                     );
                     ui.label(
                         egui::RichText::new(self.i18n.tr("compress_zstd_level_desc"))
-                            .small()
-                            .weak(),
+                            .color(HINT_COLOR)
+                            .size(11.0),
                     );
                 });
                 ui.end_row();
             });
 
-        ui.add_space(16.0);
+        ui.add_space(20.0);
         if ui
-            .button(egui::RichText::new(format!("▶ {}", self.i18n.tr("compress_export"))).strong())
+            .add_sized(
+                [ui.available_width().min(240.0), 32.0],
+                egui::Button::new(
+                    egui::RichText::new(format!("▶ {}", self.i18n.tr("compress_export")))
+                        .strong()
+                        .size(15.0),
+                ),
+            )
             .clicked()
         {
             self.save_compressed_file();
