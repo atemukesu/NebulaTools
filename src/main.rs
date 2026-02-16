@@ -1,6 +1,7 @@
 mod editor;
 mod i18n;
 mod math;
+mod particleex;
 mod player;
 mod renderer;
 mod ui;

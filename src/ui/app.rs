@@ -15,6 +15,7 @@ pub enum AppMode {
     Edit,
     Preview,
     Create,
+    Particleex,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -122,6 +123,30 @@ impl Default for CreatorState {
     }
 }
 
+pub struct ParticleexState {
+    pub commands_text: String,
+    pub preview_frames: Option<Vec<Vec<Particle>>>,
+    pub preview_playing: bool,
+    pub preview_frame_idx: i32,
+    pub preview_timer: f32,
+    pub preview_fps: u16,
+    pub status_msg: Option<String>,
+}
+
+impl Default for ParticleexState {
+    fn default() -> Self {
+        Self {
+            commands_text: String::new(),
+            preview_frames: None,
+            preview_playing: false,
+            preview_frame_idx: 0,
+            preview_timer: 0.0,
+            preview_fps: 60,
+            status_msg: None,
+        }
+    }
+}
+
 pub struct NebulaToolsApp {
     pub player: PlayerState,
     pub config: AppConfig,
@@ -137,6 +162,7 @@ pub struct NebulaToolsApp {
     pub fps_timer: f32,
     pub edit: EditState,
     pub creator: CreatorState,
+    pub pex: ParticleexState,
 }
 
 impl NebulaToolsApp {
@@ -165,6 +191,7 @@ impl NebulaToolsApp {
             fps_timer: 0.0,
             edit: EditState::default(),
             creator: CreatorState::default(),
+            pex: ParticleexState::default(),
         }
     }
 
@@ -326,7 +353,10 @@ impl NebulaToolsApp {
 
 impl eframe::App for NebulaToolsApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if self.player.header.is_none() && self.mode != AppMode::Create {
+        if self.player.header.is_none()
+            && self.mode != AppMode::Create
+            && self.mode != AppMode::Particleex
+        {
             self.show_welcome_screen(ctx);
             return;
         }
@@ -355,6 +385,7 @@ impl eframe::App for NebulaToolsApp {
                 if ui.button(self.i18n.tr("home")).clicked() {
                     self.mode = AppMode::Preview;
                     self.player.header = None;
+                    self.pex.preview_frames = None;
                 }
                 ui.separator();
 
@@ -362,6 +393,11 @@ impl eframe::App for NebulaToolsApp {
                     if self.mode == AppMode::Create {
                         if ui.button(self.i18n.tr("export_nbl")).clicked() {
                             self.export_creator_nbl();
+                            ui.close_menu();
+                        }
+                    } else if self.mode == AppMode::Particleex {
+                        if ui.button(self.i18n.tr("export_nbl")).clicked() {
+                            self.export_particleex_nbl();
                             ui.close_menu();
                         }
                     } else {
@@ -406,6 +442,8 @@ impl eframe::App for NebulaToolsApp {
                     );
                 } else if self.mode == AppMode::Create {
                     ui.selectable_value(&mut self.mode, AppMode::Create, self.i18n.tr("creator"));
+                } else if self.mode == AppMode::Particleex {
+                    ui.selectable_value(&mut self.mode, AppMode::Particleex, "Particleex");
                 }
             });
         });
@@ -414,6 +452,7 @@ impl eframe::App for NebulaToolsApp {
             AppMode::Preview => self.show_preview_workflow(ctx),
             AppMode::Edit => self.show_edit_workflow(ctx),
             AppMode::Create => self.show_creator_workflow(ctx),
+            AppMode::Particleex => self.show_particleex_workflow(ctx),
         }
     }
 

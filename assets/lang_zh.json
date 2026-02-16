@@ -109,5 +109,14 @@
     "shape_point": "点",
     "shape_sphere": "球体",
     "shape_box": "立方体",
-    "shape_ring": "圆环"
+    "shape_ring": "圆环",
+    "particleex_btn": "Particleex",
+    "particleex_title": "Particleex 命令编译器",
+    "particleex_input": "命令输入",
+    "particleex_hint": "输入 particleex 命令（每行一条），支持 normal、parameter、polarparameter 等类型",
+    "particleex_compile": "▶ 编译并预览",
+    "particleex_compiled": "编译成功，共",
+    "particleex_stats": "📊 统计信息",
+    "particleex_max_particles": "最大粒子数",
+    "particleex_total_keyframes": "总关键帧数"
 }

@@ -109,5 +109,14 @@
     "shape_point": "Point",
     "shape_sphere": "Sphere",
     "shape_box": "Box",
-    "shape_ring": "Ring"
+    "shape_ring": "Ring",
+    "particleex_btn": "Particleex",
+    "particleex_title": "Particleex Command Compiler",
+    "particleex_input": "Command Input",
+    "particleex_hint": "Enter particleex commands (one per line). Supports normal, parameter, polarparameter, etc.",
+    "particleex_compile": "▶ Compile & Preview",
+    "particleex_compiled": "Compiled successfully,",
+    "particleex_stats": "📊 Statistics",
+    "particleex_max_particles": "Max Particles",
+    "particleex_total_keyframes": "Total Keyframes"
 }
