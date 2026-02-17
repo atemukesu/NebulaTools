@@ -414,7 +414,9 @@ impl NebulaToolsApp {
                                     let slider_width = ui.available_width() - 8.0;
                                     let slider_res = ui.add_sized(
                                         [slider_width, ui.spacing().interact_size.y],
-                                        egui::Slider::new(&mut f, 0..=max_frame).show_value(true),
+                                        egui::Slider::new(&mut f, 0..=max_frame)
+                                            .show_value(true)
+                                            .trailing_fill(true),
                                     );
                                     if slider_res.changed() {
                                         self.creator.preview_frame_idx = f;

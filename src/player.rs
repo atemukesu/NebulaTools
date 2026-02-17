@@ -310,37 +310,6 @@ impl PlayerState {
         Ok(())
     }
 
-    /// Decode every frame in the file into a Vec of particle snapshots.
-    /// Each entry is a Vec<Particle> representing the state at that frame.
-    pub fn decode_all_frames(&mut self) -> Result<Vec<Vec<Particle>>> {
-        let total = self
-            .header
-            .as_ref()
-            .ok_or(anyhow!("No header"))?
-            .total_frames;
-        let mut all_frames: Vec<Vec<Particle>> = Vec::with_capacity(total as usize);
-
-        // Reset state before decoding
-        self.particles.clear();
-        self.current_frame_idx = -1;
-
-        for frame_idx in 0..total {
-            self.process_frame(frame_idx)?;
-            let snapshot: Vec<Particle> = self.particles.values().cloned().collect();
-            all_frames.push(snapshot);
-            self.current_frame_idx = frame_idx as i32;
-        }
-
-        // Reset playback state after full decode
-        self.particles.clear();
-        self.current_frame_idx = -1;
-        if total > 0 {
-            self.seek_to(0)?;
-        }
-
-        Ok(all_frames)
-    }
-
     /// Write a complete NBL file from frame snapshots.
     /// Uses I-Frames only for simplicity and maximum compatibility.
     pub fn save_file(
@@ -489,39 +458,6 @@ fn encode_i_frame(particles: &[Particle]) -> Vec<u8> {
     buf
 }
 
-// ======== Edit Transform Functions ========
-
-/// Change the target FPS without modifying frame data.
-pub fn edit_change_fps(header: &mut NblHeader, new_fps: u16) {
-    header.target_fps = new_fps;
-}
-
-/// Interpolate frames to change animation speed while keeping FPS constant.
-/// speed_factor > 1.0 = faster (fewer frames), speed_factor < 1.0 = slower (more frames).
-pub fn edit_interpolate_frames(frames: &[Vec<Particle>], speed_factor: f32) -> Vec<Vec<Particle>> {
-    if frames.is_empty() || speed_factor <= 0.0 {
-        return frames.to_vec();
-    }
-
-    let new_count = ((frames.len() as f32) / speed_factor).round().max(1.0) as usize;
-    let mut result = Vec::with_capacity(new_count);
-
-    for i in 0..new_count {
-        let src_pos = (i as f32) * (frames.len() as f32 - 1.0) / (new_count as f32 - 1.0).max(1.0);
-        let idx_a = (src_pos.floor() as usize).min(frames.len() - 1);
-        let idx_b = (idx_a + 1).min(frames.len() - 1);
-        let t = src_pos - idx_a as f32;
-
-        if idx_a == idx_b || t < 0.001 {
-            result.push(frames[idx_a].clone());
-        } else {
-            result.push(lerp_particles(&frames[idx_a], &frames[idx_b], t));
-        }
-    }
-
-    result
-}
-
 /// Linearly interpolate between two particle snapshots.
 fn lerp_particles(a: &[Particle], b: &[Particle], t: f32) -> Vec<Particle> {
     let a_map: HashMap<i32, &Particle> = a.iter().map(|p| (p.id, p)).collect();
@@ -573,58 +509,6 @@ fn lerp_u8(a: u8, b: u8, t: f32) -> u8 {
         .clamp(0.0, 255.0) as u8
 }
 
-/// Scale particle sizes across all frames by a multiplier.
-pub fn edit_scale_size(frames: &mut [Vec<Particle>], factor: f32) {
-    for frame in frames.iter_mut() {
-        for p in frame.iter_mut() {
-            p.size *= factor;
-        }
-    }
-}
-
-/// Set all particle sizes to a uniform value across all frames.
-pub fn edit_uniform_size(frames: &mut [Vec<Particle>], size: f32) {
-    for frame in frames.iter_mut() {
-        for p in frame.iter_mut() {
-            p.size = size;
-        }
-    }
-}
-
-/// Adjust brightness (RGB) and opacity (Alpha) of all particles.
-pub fn edit_adjust_color(frames: &mut [Vec<Particle>], brightness: f32, opacity: f32) {
-    for frame in frames.iter_mut() {
-        for p in frame.iter_mut() {
-            p.color[0] = (p.color[0] as f32 * brightness).round().clamp(0.0, 255.0) as u8;
-            p.color[1] = (p.color[1] as f32 * brightness).round().clamp(0.0, 255.0) as u8;
-            p.color[2] = (p.color[2] as f32 * brightness).round().clamp(0.0, 255.0) as u8;
-            p.color[3] = (p.color[3] as f32 * opacity).round().clamp(0.0, 255.0) as u8;
-        }
-    }
-}
-
-/// Translate all particle positions by an offset.
-pub fn edit_translate(frames: &mut [Vec<Particle>], offset: [f32; 3]) {
-    for frame in frames.iter_mut() {
-        for p in frame.iter_mut() {
-            p.pos[0] += offset[0];
-            p.pos[1] += offset[1];
-            p.pos[2] += offset[2];
-        }
-    }
-}
-
-/// Scale all particle positions by a factor (relative to origin).
-pub fn edit_scale_position(frames: &mut [Vec<Particle>], scale: f32) {
-    for frame in frames.iter_mut() {
-        for p in frame.iter_mut() {
-            p.pos[0] *= scale;
-            p.pos[1] *= scale;
-            p.pos[2] *= scale;
-        }
-    }
-}
-
 /// Recalculate the AABB bounding box from frame data.
 pub fn recalculate_bbox(frames: &[Vec<Particle>]) -> ([f32; 3], [f32; 3]) {
     let mut bbox_min = [f32::MAX; 3];
@@ -642,13 +526,6 @@ pub fn recalculate_bbox(frames: &[Vec<Particle>]) -> ([f32; 3], [f32; 3]) {
         bbox_max = [0.0; 3];
     }
     (bbox_min, bbox_max)
-}
-
-/// Trim frames to a sub-range [start, end] (inclusive).
-pub fn edit_trim_frames(frames: &[Vec<Particle>], start: usize, end: usize) -> Vec<Vec<Particle>> {
-    let end = end.min(frames.len().saturating_sub(1));
-    let start = start.min(end);
-    frames[start..=end].to_vec()
 }
 
 /// Encode a P-Frame: delta between prev_particles and cur_particles.
@@ -758,22 +635,95 @@ pub struct CompressProgress {
     pub start_time: std::time::Instant,
 }
 
-/// Stream-compress an NBL file from source to output using I/P frame encoding.
-/// Reads frames one-at-a-time from the source file to avoid loading everything into memory.
-/// Reports progress via `CompressProgress`.
-pub fn streaming_compress(
+/// Helper function to detect if particle movement exceeds the P-Frame delta limit (int16 * 1000 = 32.767).
+/// If it does, we should force an I-Frame for this frame.
+fn check_velocity_overflow(prev: &[Particle], curr: &[Particle]) -> bool {
+    let prev_map: HashMap<i32, [f32; 3]> = prev.iter().map(|p| (p.id, p.pos)).collect();
+
+    for p in curr {
+        if let Some(old_pos) = prev_map.get(&p.id) {
+            let dx = (p.pos[0] - old_pos[0]).abs();
+            let dy = (p.pos[1] - old_pos[1]).abs();
+            let dz = (p.pos[2] - old_pos[2]).abs();
+
+            if dx > 32.76 || dy > 32.76 || dz > 32.76 {
+                return true;
+            }
+        } else {
+            // New particles are delta-coded against (0,0,0)
+            if p.pos[0].abs() > 32.76 || p.pos[1].abs() > 32.76 || p.pos[2].abs() > 32.76 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum EditAction {
+    ChangeFps(u16),
+    Interpolate(f32),
+    InterpolateAndFps(f32, u16),
+    ScaleSize(f32),
+    UniformSize(f32),
+    AdjustColor(f32, f32),
+    Transform([f32; 3], f32),
+    Trim(u32, u32),
+    Compress(u32),
+}
+
+/// Stream-process an NBL file applying an EditAction.
+pub fn streaming_edit(
     source_path: PathBuf,
     output_path: PathBuf,
-    keyframe_interval: u32,
+    action: EditAction,
     zstd_level: i32,
     progress: Arc<Mutex<CompressProgress>>,
 ) -> Result<()> {
     // 1. Initial load for metadata
     let mut player = PlayerState::default();
     player.load_file(source_path)?;
-    let header = player.header.as_ref().ok_or(anyhow!("No header"))?.clone();
+    let mut header = player.header.as_ref().ok_or(anyhow!("No header"))?.clone();
     let textures = player.textures.clone();
-    let total_frames = header.total_frames;
+    let old_total_frames = header.total_frames;
+
+    // 2. Determine new header parameters
+    let mut new_total_frames = old_total_frames;
+
+    // Default compression interval (0 = auto)
+    let mut keyframe_interval = 0;
+
+    match action {
+        EditAction::ChangeFps(fps) => {
+            header.target_fps = fps;
+        }
+        EditAction::Interpolate(factor) => {
+            if factor > 0.0 {
+                new_total_frames = ((old_total_frames as f32) / factor).round().max(1.0) as u32;
+            }
+        }
+        EditAction::InterpolateAndFps(factor, fps) => {
+            header.target_fps = fps;
+            if factor > 0.0 {
+                new_total_frames = ((old_total_frames as f32) / factor).round().max(1.0) as u32;
+            }
+        }
+        EditAction::Trim(start, end) => {
+            let start = start.min(old_total_frames.saturating_sub(1));
+            let end = end.min(old_total_frames.saturating_sub(1)).max(start);
+            new_total_frames = end - start + 1;
+        }
+        EditAction::Compress(interval) => {
+            keyframe_interval = interval;
+        }
+        _ => {}
+    }
+
+    if let Ok(mut p) = progress.lock() {
+        p.total_frames = new_total_frames;
+        p.is_done = false;
+        p.error = None;
+    }
 
     let file = File::create(&output_path)?;
     let mut writer = BufWriter::new(file);
@@ -785,27 +735,18 @@ pub fn streaming_compress(
     for tex in &textures {
         tex_block_size += 2 + tex.path.as_bytes().len() + 1 + 1;
     }
-
-    // Frame Index Table: TotalFrames * 12 bytes
-    let frame_index_table_size = total_frames as usize * 12;
-
-    // Keyframe Index Table (Maximum Reservation): TotalFrames * 4 bytes + 4 (count)
-    let max_possible_keyframes = total_frames;
-    let keyframe_index_table_reserved_size = 4 + (max_possible_keyframes as usize) * 4;
-
-    // Start of data area
+    let frame_index_table_size = new_total_frames as usize * 12;
+    let keyframe_index_table_reserved_size = 4 + (new_total_frames as usize) * 4;
     let data_start_offset =
         48 + tex_block_size + frame_index_table_size + keyframe_index_table_reserved_size;
 
     // ==========================================
     // Step B: Write Header & Textures & Padding
     // ==========================================
-
-    // Header (48 bytes)
     writer.write_all(MAGIC)?;
     writer.write_u16::<LittleEndian>(header.version)?;
     writer.write_u16::<LittleEndian>(header.target_fps)?;
-    writer.write_u32::<LittleEndian>(total_frames)?;
+    writer.write_u32::<LittleEndian>(new_total_frames)?;
     writer.write_u16::<LittleEndian>(textures.len() as u16)?;
     writer.write_u16::<LittleEndian>(header.attributes)?;
     for v in &header.bbox_min {
@@ -816,7 +757,6 @@ pub fn streaming_compress(
     }
     writer.write_all(&[0u8; 4])?;
 
-    // Texture block
     for tex in &textures {
         let path_bytes = tex.path.as_bytes();
         writer.write_u16::<LittleEndian>(path_bytes.len() as u16)?;
@@ -825,84 +765,148 @@ pub fn streaming_compress(
         writer.write_u8(tex.cols)?;
     }
 
-    // Padding with zeros until data_start_offset
     let current_pos = writer.stream_position()?;
     let padding_size = data_start_offset as u64 - current_pos;
     let zeros = vec![0u8; 8192];
     let mut remaining = padding_size;
     while remaining > 0 {
-        let chunk = remaining.min(8192);
-        writer.write_all(&zeros[0..chunk as usize])?;
-        remaining -= chunk;
+        let chunk = remaining.min(8192) as usize;
+        writer.write_all(&zeros[0..chunk])?;
+        remaining -= chunk as u64;
     }
 
     // ==========================================
-    // Step C: Stream Compression
+    // Step C: Stream Processing
     // ==========================================
     player.particles.clear();
     player.current_frame_idx = -1;
-    let mut previous_snapshot: Vec<Particle> = Vec::new();
-    let mut current_snapshot: Vec<Particle> = Vec::new();
+    let mut previous_written_snapshot: Vec<Particle> = Vec::new();
 
-    let mut index_entries: Vec<(u64, u32)> = Vec::with_capacity(total_frames as usize);
+    // Cache for frame interpolation
+    let mut source_cache: HashMap<u32, Vec<Particle>> = HashMap::new();
+    let mut next_needed_source_frame: u32 = 0;
+
+    let mut index_entries: Vec<(u64, u32)> = Vec::with_capacity(new_total_frames as usize);
     let mut real_keyframe_list: Vec<u32> = Vec::new();
-
     let mut current_data_offset = data_start_offset as u64;
 
-    for frame_idx in 0..total_frames {
-        player.process_frame(frame_idx)?;
-
-        // Collect and sort particles for stable diffs
-        current_snapshot.clear();
-        let mut sorted_ids: Vec<i32> = player.particles.keys().cloned().collect();
-        sorted_ids.sort_unstable();
-        for id in sorted_ids {
-            if let Some(p) = player.particles.get(&id) {
-                current_snapshot.push(p.clone());
+    for output_frame_idx in 0..new_total_frames {
+        // 1. Determine which source frame(s) we need
+        let (src_idx_a, src_idx_b, t) = match action {
+            EditAction::Trim(start, _) => {
+                let s = start.min(old_total_frames.saturating_sub(1));
+                (s + output_frame_idx, s + output_frame_idx, 0.0)
             }
+            EditAction::Interpolate(_) | EditAction::InterpolateAndFps(_, _) => {
+                if new_total_frames <= 1 {
+                    (0, 0, 0.0)
+                } else {
+                    let src_pos = (output_frame_idx as f32) * (old_total_frames as f32 - 1.0)
+                        / (new_total_frames as f32 - 1.0);
+                    let idx_a = (src_pos.floor() as u32).min(old_total_frames - 1);
+                    let idx_b = (idx_a + 1).min(old_total_frames - 1);
+                    (idx_a, idx_b, src_pos - idx_a as f32)
+                }
+            }
+            _ => (output_frame_idx, output_frame_idx, 0.0),
+        };
+
+        // 2. Ensure source frames are loaded into cache
+        // We can discard frames older than src_idx_a (assuming linear scan)
+        source_cache.retain(|&k, _| k >= src_idx_a);
+
+        let max_needed = src_idx_b.max(src_idx_a);
+        while next_needed_source_frame <= max_needed && next_needed_source_frame < old_total_frames
+        {
+            player.process_frame(next_needed_source_frame)?;
+            // Current state of player.particles is now next_needed_source_frame
+            let mut snapshot: Vec<Particle> = player.particles.values().cloned().collect();
+            // Sort to ensure stable interpolation
+            snapshot.sort_unstable_by_key(|p| p.id);
+            source_cache.insert(next_needed_source_frame, snapshot);
+            next_needed_source_frame += 1;
         }
 
-        // Determine if this should be an I-Frame
+        // 3. Generate base particles for this frame
+        let mut particles = if src_idx_a == src_idx_b || t < 0.001 {
+            source_cache.get(&src_idx_a).cloned().unwrap_or_default()
+        } else {
+            let pa = source_cache.get(&src_idx_a);
+            let pb = source_cache.get(&src_idx_b);
+            if let (Some(a), Some(b)) = (pa, pb) {
+                lerp_particles(a, b, t)
+            } else {
+                pa.cloned().or_else(|| pb.cloned()).unwrap_or_default()
+            }
+        };
+
+        // 4. Apply transforms
+        match action {
+            EditAction::ScaleSize(s) => {
+                for p in &mut particles {
+                    p.size *= s;
+                }
+            }
+            EditAction::UniformSize(s) => {
+                for p in &mut particles {
+                    p.size = s;
+                }
+            }
+            EditAction::AdjustColor(b, o) => {
+                for p in &mut particles {
+                    let c0 = (p.color[0] as f32 * b).round().clamp(0.0, 255.0) as u8;
+                    let c1 = (p.color[1] as f32 * b).round().clamp(0.0, 255.0) as u8;
+                    let c2 = (p.color[2] as f32 * b).round().clamp(0.0, 255.0) as u8;
+                    let c3 = (p.color[3] as f32 * o).round().clamp(0.0, 255.0) as u8;
+                    p.color = [c0, c1, c2, c3];
+                }
+            }
+            EditAction::Transform(trans, scale) => {
+                for p in &mut particles {
+                    p.pos[0] = p.pos[0] * scale + trans[0];
+                    p.pos[1] = p.pos[1] * scale + trans[1];
+                    p.pos[2] = p.pos[2] * scale + trans[2];
+                }
+            }
+            _ => {}
+        }
+
+        // 5. Compression / Encoding
+        // Sort for consistent encoding
+        particles.sort_unstable_by_key(|p| p.id);
+        let current_written_snapshot = particles;
+
         let mut force_iframe = false;
         let effective_interval = if keyframe_interval == 0 {
-            1
+            60
         } else {
             keyframe_interval
         };
 
-        if frame_idx == 0 || frame_idx % effective_interval == 0 {
+        if output_frame_idx == 0 || output_frame_idx % effective_interval == 0 {
+            force_iframe = true;
+        } else if check_velocity_overflow(&previous_written_snapshot, &current_written_snapshot) {
             force_iframe = true;
         }
 
-        if !force_iframe {
-            // Dynamic I-Frame detection: check for velocity overflow
-            if check_velocity_overflow(&previous_snapshot, &current_snapshot) {
-                force_iframe = true;
-            }
-        }
-
         let raw_packet = if force_iframe {
-            real_keyframe_list.push(frame_idx);
-            encode_i_frame(&current_snapshot)
+            real_keyframe_list.push(output_frame_idx);
+            encode_i_frame(&current_written_snapshot)
         } else {
-            encode_p_frame(&previous_snapshot, &current_snapshot)
+            encode_p_frame(&previous_written_snapshot, &current_written_snapshot)
         };
 
-        // ZSTD compression
         let compressed = zstd::encode_all(Cursor::new(&raw_packet), zstd_level)?;
         writer.write_all(&compressed)?;
 
-        // Record index
         index_entries.push((current_data_offset, compressed.len() as u32));
         current_data_offset += compressed.len() as u64;
 
-        // Swap snapshots
-        std::mem::swap(&mut previous_snapshot, &mut current_snapshot);
+        previous_written_snapshot = current_written_snapshot;
 
-        // Update progress
-        if frame_idx % 10 == 0 || frame_idx == total_frames - 1 {
+        if output_frame_idx % 10 == 0 || output_frame_idx == new_total_frames - 1 {
             if let Ok(mut p) = progress.lock() {
-                p.current_frame = frame_idx + 1;
+                p.current_frame = output_frame_idx + 1;
             }
         }
     }
@@ -912,8 +916,6 @@ pub fn streaming_compress(
     // ==========================================
     // Step D: Patch Indices
     // ==========================================
-
-    // Seek to Frame Index Table start
     let frame_table_pos = 48 + tex_block_size;
     writer.seek(SeekFrom::Start(frame_table_pos as u64))?;
 
@@ -922,7 +924,6 @@ pub fn streaming_compress(
         writer.write_u32::<LittleEndian>(*size)?;
     }
 
-    // Keyframe Index Table follows immediately
     writer.write_u32::<LittleEndian>(real_keyframe_list.len() as u32)?;
     for &kf_idx in &real_keyframe_list {
         writer.write_u32::<LittleEndian>(kf_idx)?;
@@ -935,24 +936,4 @@ pub fn streaming_compress(
     }
 
     Ok(())
-}
-
-/// Helper function to detect if particle movement exceeds the P-Frame delta limit (int16 * 1000 = 32.767).
-/// If it does, we should force an I-Frame for this frame.
-fn check_velocity_overflow(prev: &[Particle], curr: &[Particle]) -> bool {
-    let prev_map: HashMap<i32, [f32; 3]> = prev.iter().map(|p| (p.id, p.pos)).collect();
-
-    for p in curr {
-        if let Some(old_pos) = prev_map.get(&p.id) {
-            let dx = (p.pos[0] - old_pos[0]).abs();
-            let dy = (p.pos[1] - old_pos[1]).abs();
-            let dz = (p.pos[2] - old_pos[2]).abs();
-
-            // Limit: 32.767
-            if dx > 32.76 || dy > 32.76 || dz > 32.76 {
-                return true;
-            }
-        }
-    }
-    false
 }

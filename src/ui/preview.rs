@@ -177,7 +177,8 @@ impl NebulaToolsApp {
                             let slider_res = ui.add_sized(
                                 [slider_width, ui.spacing().interact_size.y],
                                 egui::Slider::new(&mut visual_frame, 0..=max_frame)
-                                    .show_value(false),
+                                    .show_value(false)
+                                    .trailing_fill(true),
                             );
 
                             let is_scrubbing = slider_res.dragged() || drag_res.dragged();

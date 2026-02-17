@@ -51,18 +51,7 @@ impl NebulaToolsApp {
 
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
                     ui.add_space(8.0);
-                    if ui
-                        .add_sized(
-                            [ui.available_width(), 32.0],
-                            egui::Button::new(
-                                egui::RichText::new(self.i18n.tr("save_file")).strong(),
-                            ),
-                        )
-                        .clicked()
-                    {
-                        self.save_edited_file();
-                    }
-                    ui.add_space(8.0);
+                    // Save button removed
                     ui.separator();
                 });
             });
@@ -104,6 +93,8 @@ impl NebulaToolsApp {
                         crate::ui::app::EditTool::Trim => self.ui_trim_params(ui),
                         crate::ui::app::EditTool::Compress => self.ui_compress_params(ui),
                     });
+
+                self.ui_progress_bar(ui);
 
                 ui.add_space(16.0);
 
@@ -377,18 +368,27 @@ impl NebulaToolsApp {
         });
 
         ui.add_space(20.0);
+        ui.add_space(20.0);
         if ui
             .add_sized(
                 [ui.available_width().min(200.0), 32.0],
                 egui::Button::new(
-                    egui::RichText::new(format!("▶ {}", self.i18n.tr("apply")))
+                    egui::RichText::new(format!("▶ {}", self.i18n.tr("export_nbl")))
                         .strong()
                         .size(15.0),
                 ),
             )
             .clicked()
         {
-            self.apply_speed_edit();
+            let action = match self.edit.speed_mode {
+                0 => player::EditAction::ChangeFps(self.edit.new_fps),
+                1 => player::EditAction::Interpolate(self.edit.speed_factor),
+                2 => {
+                    player::EditAction::InterpolateAndFps(self.edit.speed_factor, self.edit.new_fps)
+                }
+                _ => player::EditAction::ChangeFps(self.edit.new_fps),
+            };
+            self.start_export(action);
         }
     }
 
@@ -461,18 +461,24 @@ impl NebulaToolsApp {
         });
 
         ui.add_space(20.0);
+        ui.add_space(20.0);
         if ui
             .add_sized(
                 [ui.available_width().min(200.0), 32.0],
                 egui::Button::new(
-                    egui::RichText::new(format!("▶ {}", self.i18n.tr("apply")))
+                    egui::RichText::new(format!("▶ {}", self.i18n.tr("export_nbl")))
                         .strong()
                         .size(15.0),
                 ),
             )
             .clicked()
         {
-            self.apply_size_edit();
+            let action = match self.edit.size_mode {
+                0 => player::EditAction::ScaleSize(self.edit.size_scale),
+                1 => player::EditAction::UniformSize(self.edit.size_uniform),
+                _ => player::EditAction::ScaleSize(1.0),
+            };
+            self.start_export(action);
         }
     }
 
@@ -508,18 +514,22 @@ impl NebulaToolsApp {
             });
 
         ui.add_space(20.0);
+        ui.add_space(20.0);
         if ui
             .add_sized(
                 [ui.available_width().min(200.0), 32.0],
                 egui::Button::new(
-                    egui::RichText::new(format!("▶ {}", self.i18n.tr("apply")))
+                    egui::RichText::new(format!("▶ {}", self.i18n.tr("export_nbl")))
                         .strong()
                         .size(15.0),
                 ),
             )
             .clicked()
         {
-            self.apply_color_edit();
+            self.start_export(player::EditAction::AdjustColor(
+                self.edit.brightness,
+                self.edit.opacity,
+            ));
         }
     }
 
@@ -557,18 +567,22 @@ impl NebulaToolsApp {
             });
 
         ui.add_space(20.0);
+        ui.add_space(20.0);
         if ui
             .add_sized(
                 [ui.available_width().min(200.0), 32.0],
                 egui::Button::new(
-                    egui::RichText::new(format!("▶ {}", self.i18n.tr("apply")))
+                    egui::RichText::new(format!("▶ {}", self.i18n.tr("export_nbl")))
                         .strong()
                         .size(15.0),
                 ),
             )
             .clicked()
         {
-            self.apply_transform_edit();
+            self.start_export(player::EditAction::Transform(
+                self.edit.translate,
+                self.edit.pos_scale,
+            ));
         }
     }
 
@@ -643,256 +657,29 @@ impl NebulaToolsApp {
         }
 
         ui.add_space(20.0);
+        ui.add_space(20.0);
         if ui
             .add_sized(
                 [ui.available_width().min(200.0), 32.0],
                 egui::Button::new(
-                    egui::RichText::new(format!("▶ {}", self.i18n.tr("apply")))
+                    egui::RichText::new(format!("▶ {}", self.i18n.tr("export_nbl")))
                         .strong()
                         .size(15.0),
                 ),
             )
             .clicked()
         {
-            self.apply_trim_edit();
+            self.start_export(player::EditAction::Trim(
+                self.edit.trim_start,
+                self.edit.trim_end,
+            ));
         }
     }
-
-    // ── Apply helpers ──
 
     /// Decode all frames on demand. Returns true if frames are available.
-    fn decode_if_needed(&mut self) -> bool {
-        if self.edit.decoded_frames.is_some() {
-            return true;
-        }
-        if self.player.header.is_none() {
-            self.edit.status_msg = Some(self.i18n.tr("no_file_loaded").to_string());
-            return false;
-        }
-        match self.player.decode_all_frames() {
-            Ok(frames) => {
-                let header = self.player.header.clone().unwrap();
-                self.edit.trim_end = header.total_frames.saturating_sub(1);
-                self.edit.new_fps = header.target_fps;
-                self.edit.edited_header = Some(header);
-                self.edit.decoded_frames = Some(frames);
-                self.edit.status_msg = None;
-                true
-            }
-            Err(e) => {
-                self.edit.status_msg = Some(format!("Decode failed: {}", e));
-                false
-            }
-        }
-    }
-
-    fn apply_speed_edit(&mut self) {
-        if !self.decode_if_needed() {
-            return;
-        }
-        if let Some(ref mut frames) = self.edit.decoded_frames {
-            if let Some(ref mut header) = self.edit.edited_header {
-                match self.edit.speed_mode {
-                    0 => player::edit_change_fps(header, self.edit.new_fps),
-                    1 => {
-                        let nf = player::edit_interpolate_frames(frames, self.edit.speed_factor);
-                        *frames = nf;
-                    }
-                    2 => {
-                        player::edit_change_fps(header, self.edit.new_fps);
-                        let nf = player::edit_interpolate_frames(frames, self.edit.speed_factor);
-                        *frames = nf;
-                    }
-                    _ => {}
-                }
-                header.total_frames = frames.len() as u32;
-                self.edit.trim_end = header.total_frames.saturating_sub(1);
-                self.edit.status_msg = Some(self.i18n.tr("apply_success").to_string());
-            }
-        }
-    }
-
-    fn apply_size_edit(&mut self) {
-        if !self.decode_if_needed() {
-            return;
-        }
-        if let Some(ref mut frames) = self.edit.decoded_frames {
-            match self.edit.size_mode {
-                0 => player::edit_scale_size(frames, self.edit.size_scale),
-                1 => player::edit_uniform_size(frames, self.edit.size_uniform),
-                _ => {}
-            }
-            self.edit.status_msg = Some(self.i18n.tr("apply_success").to_string());
-        }
-    }
-
-    fn apply_color_edit(&mut self) {
-        if !self.decode_if_needed() {
-            return;
-        }
-        if let Some(ref mut frames) = self.edit.decoded_frames {
-            player::edit_adjust_color(frames, self.edit.brightness, self.edit.opacity);
-            self.edit.brightness = 1.0;
-            self.edit.opacity = 1.0;
-            self.edit.status_msg = Some(self.i18n.tr("apply_success").to_string());
-        }
-    }
-
-    fn apply_transform_edit(&mut self) {
-        if !self.decode_if_needed() {
-            return;
-        }
-        if let Some(ref mut frames) = self.edit.decoded_frames {
-            if self.edit.translate != [0.0; 3] {
-                player::edit_translate(frames, self.edit.translate);
-                self.edit.translate = [0.0; 3];
-            }
-            if (self.edit.pos_scale - 1.0).abs() > 0.001 {
-                player::edit_scale_position(frames, self.edit.pos_scale);
-                self.edit.pos_scale = 1.0;
-            }
-            if let Some(ref mut header) = self.edit.edited_header {
-                let (bmin, bmax) = player::recalculate_bbox(frames);
-                header.bbox_min = bmin;
-                header.bbox_max = bmax;
-            }
-            self.edit.status_msg = Some(self.i18n.tr("apply_success").to_string());
-        }
-    }
-
-    fn apply_trim_edit(&mut self) {
-        if !self.decode_if_needed() {
-            return;
-        }
-        if let Some(ref mut frames) = self.edit.decoded_frames {
-            let nf = player::edit_trim_frames(
-                frames,
-                self.edit.trim_start as usize,
-                self.edit.trim_end as usize,
-            );
-            *frames = nf;
-            if let Some(ref mut header) = self.edit.edited_header {
-                header.total_frames = frames.len() as u32;
-                let (bmin, bmax) = player::recalculate_bbox(frames);
-                header.bbox_min = bmin;
-                header.bbox_max = bmax;
-            }
-            self.edit.trim_start = 0;
-            self.edit.trim_end = frames.len().saturating_sub(1) as u32;
-            self.edit.status_msg = Some(self.i18n.tr("apply_success").to_string());
-        }
-    }
-
-    fn save_edited_file(&mut self) {
-        let frames = match self.edit.decoded_frames {
-            Some(ref f) => f.clone(),
-            None => {
-                self.edit.status_msg = Some(self.i18n.tr("apply_failed").to_string());
-                return;
-            }
-        };
-        let header = match self.edit.edited_header {
-            Some(ref h) => h.clone(),
-            None => {
-                self.edit.status_msg = Some(self.i18n.tr("apply_failed").to_string());
-                return;
-            }
-        };
-        let textures = self.player.textures.clone();
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter("Nebula", &["nbl"])
-            .set_file_name("output.nbl")
-            .save_file()
-        {
-            match self.player.save_file(&path, &header, &textures, &frames) {
-                Ok(_) => {
-                    self.edit.status_msg = Some(self.i18n.tr("apply_success").to_string());
-                }
-                Err(e) => {
-                    self.edit.status_msg = Some(format!("{}: {}", self.i18n.tr("apply_failed"), e));
-                }
-            }
-        }
-    }
 
     fn ui_compress_params(&mut self, ui: &mut egui::Ui) {
-        // Extract progress info to avoid borrow issues
-        let progress_state = self.edit.compress_progress.as_ref().map(|prog| {
-            let p = prog.lock().unwrap();
-            (
-                p.current_frame,
-                p.total_frames,
-                p.is_done,
-                p.error.clone(),
-                p.start_time,
-            )
-        });
-
-        if let Some((current, total, is_done, error, start_time)) = progress_state {
-            if !is_done && error.is_none() {
-                // Show progress bar
-                ui.add_space(8.0);
-                ui.label(
-                    egui::RichText::new(self.i18n.tr("compress_progress"))
-                        .strong()
-                        .size(18.0)
-                        .color(ACCENT),
-                );
-                ui.add_space(8.0);
-
-                let fraction = current as f32 / total.max(1) as f32;
-
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new(format!("{} / {}", current, total))
-                            .strong()
-                            .color(ACCENT),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(format!("{:.1}%", fraction * 100.0));
-                    });
-                });
-
-                ui.scope(|ui| {
-                    ui.style_mut().visuals.extreme_bg_color = egui::Color32::from_gray(15);
-                    ui.add_sized(
-                        [ui.available_width(), 20.0],
-                        egui::ProgressBar::new(fraction).animate(false).fill(ACCENT),
-                    );
-                });
-
-                let elapsed = start_time.elapsed().as_secs_f32();
-                if current > 0 {
-                    let rate = current as f32 / elapsed;
-                    let remaining = (total - current) as f32 / rate;
-
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new(format!("ETA: {:.0}s", remaining))
-                                .color(HINT_COLOR),
-                        );
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(
-                                egui::RichText::new(format!("{:.0} fps", rate)).color(HINT_COLOR),
-                            );
-                        });
-                    });
-                }
-
-                ui.ctx().request_repaint();
-                return;
-            }
-
-            // Compression finished or errored
-            if is_done {
-                self.edit.compress_progress = None;
-                self.edit.status_msg = Some(self.i18n.tr("apply_success").to_string());
-            } else if let Some(err) = error {
-                self.edit.compress_progress = None;
-                self.edit.status_msg = Some(format!("❌ {}", err));
-            }
-        }
+        // Progress logic moved to ui_progress_bar
 
         // Warning message
         ui.horizontal_wrapped(|ui| {
@@ -955,6 +742,7 @@ impl NebulaToolsApp {
             });
 
         ui.add_space(20.0);
+        ui.add_space(20.0);
         if ui
             .add_sized(
                 [ui.available_width().min(240.0), 32.0],
@@ -966,16 +754,100 @@ impl NebulaToolsApp {
             )
             .clicked()
         {
-            self.save_compressed_file();
+            self.start_export(player::EditAction::Compress(
+                self.edit.compress_keyframe_interval,
+            ));
         }
     }
 
-    fn save_compressed_file(&mut self) {
-        // Don't start if already compressing
+    fn ui_progress_bar(&mut self, ui: &mut egui::Ui) {
+        let progress_state = self.edit.compress_progress.as_ref().map(|prog| {
+            let p = prog.lock().unwrap();
+            (
+                p.current_frame,
+                p.total_frames,
+                p.is_done,
+                p.error.clone(),
+                p.start_time,
+            )
+        });
+
+        if let Some((current, total, is_done, error, start_time)) = progress_state {
+            if !is_done && error.is_none() {
+                ui.add_space(10.0);
+                ui.separator();
+                ui.add_space(10.0);
+
+                ui.label(
+                    egui::RichText::new(self.i18n.tr("compress_progress"))
+                        .strong()
+                        .size(16.0)
+                        .color(ACCENT),
+                );
+                ui.add_space(8.0);
+
+                let fraction = current as f32 / total.max(1) as f32;
+
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(format!("{} / {}", current, total))
+                            .strong()
+                            .color(ACCENT),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(format!("{:.1}%", fraction * 100.0));
+                    });
+                });
+
+                ui.scope(|ui| {
+                    ui.style_mut().visuals.extreme_bg_color = egui::Color32::from_gray(15);
+                    ui.add_sized(
+                        [ui.available_width(), 16.0],
+                        egui::ProgressBar::new(fraction)
+                            .animate(true)
+                            .fill(egui::Color32::from_gray(128)),
+                    );
+                });
+
+                let elapsed = start_time.elapsed().as_secs_f32();
+                if current > 0 {
+                    let rate = current as f32 / elapsed;
+                    let remaining = (total - current) as f32 / rate;
+
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(format!("ETA: {:.0}s", remaining))
+                                .color(HINT_COLOR),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(
+                                egui::RichText::new(format!("{:.0} fps", rate)).color(HINT_COLOR),
+                            );
+                        });
+                    });
+                }
+
+                ui.ctx().request_repaint();
+                return;
+            }
+
+            // Done or Error logic
+            if is_done {
+                self.edit.compress_progress = None;
+                self.edit.status_msg = Some(self.i18n.tr("apply_success").to_string());
+            } else if let Some(err) = error {
+                self.edit.compress_progress = None;
+                self.edit.status_msg = Some(format!("❌ {}", err));
+            }
+        }
+    }
+
+    fn start_export(&mut self, action: player::EditAction) {
         if let Some(ref prog) = self.edit.compress_progress {
             if let Ok(p) = prog.lock() {
                 if !p.is_done && p.error.is_none() {
-                    return;
+                    return; // Already busy
                 }
             }
         }
@@ -988,46 +860,36 @@ impl NebulaToolsApp {
             }
         };
 
-        let output_path = match rfd::FileDialog::new()
+        if let Some(output_path) = rfd::FileDialog::new()
             .add_filter("Nebula", &["nbl"])
-            .set_file_name("output_compressed.nbl")
+            .set_file_name("export.nbl")
             .save_file()
         {
-            Some(p) => p,
-            None => return,
-        };
+            let progress = Arc::new(Mutex::new(player::CompressProgress {
+                total_frames: 0,
+                current_frame: 0,
+                is_done: false,
+                error: None,
+                start_time: std::time::Instant::now(),
+            }));
+            self.edit.compress_progress = Some(progress.clone());
 
-        let keyframe_interval = self.edit.compress_keyframe_interval;
-        let zstd_level = self.edit.compress_zstd_level;
-        let total_frames = self
-            .player
-            .header
-            .as_ref()
-            .map(|h| h.total_frames)
-            .unwrap_or(0);
+            // Use level 3 as broad default, can optimize later
+            let zstd_level = self.edit.compress_zstd_level.clamp(1, 22);
 
-        let progress = Arc::new(Mutex::new(crate::player::CompressProgress {
-            total_frames,
-            current_frame: 0,
-            is_done: false,
-            error: None,
-            start_time: std::time::Instant::now(),
-        }));
-
-        self.edit.compress_progress = Some(progress.clone());
-
-        std::thread::spawn(move || {
-            if let Err(e) = crate::player::streaming_compress(
-                source_path,
-                output_path,
-                keyframe_interval,
-                zstd_level,
-                progress.clone(),
-            ) {
-                if let Ok(mut p) = progress.lock() {
-                    p.error = Some(format!("{}", e));
+            std::thread::spawn(move || {
+                if let Err(e) = player::streaming_edit(
+                    source_path,
+                    output_path,
+                    action,
+                    zstd_level,
+                    progress.clone(),
+                ) {
+                    if let Ok(mut p) = progress.lock() {
+                        p.error = Some(format!("{}", e));
+                    }
                 }
-            }
-        });
+            });
+        }
     }
 }

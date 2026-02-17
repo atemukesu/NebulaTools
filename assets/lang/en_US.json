@@ -148,5 +148,5 @@
     "compress_zstd_level": "Zstd Compression Level",
     "compress_zstd_level_desc": "Higher level = better compression ratio but slower encoding. Range: 1-5.",
     "compress_export": "Export Compressed .nbl",
-    "compress_progress": "Compressing..."
+    "compress_progress": "Processing..."
 }
