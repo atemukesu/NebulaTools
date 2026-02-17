@@ -140,7 +140,7 @@
     "pex_command_editor_title": "Command Editor",
     "remove": "Remove",
     "fullscreen": "Fullscreen",
-    "edit_compress": "🗜️ NBL Compression",
+    "edit_compress": "🗜️ NBL Compression (Experimental)",
     "edit_compress_desc": "Re-encode the NBL file using I/P frame compression to reduce file size. I-Frames store full particle snapshots; P-Frames store only deltas from the previous frame, significantly reducing redundancy.",
     "compress_warning": "If you don't understand what this does, please do not use it.",
     "compress_keyframe_interval": "Keyframe Interval",

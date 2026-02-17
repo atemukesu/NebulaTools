@@ -140,7 +140,7 @@
     "pex_command_editor_title": "コマンドエディタ",
     "remove": "削除",
     "fullscreen": "全画面表示",
-    "edit_compress": "🗜️ NBL 圧縮",
+    "edit_compress": "🗜️ NBL 圧縮 (実験的)",
     "edit_compress_desc": "I/Pフレーム圧縮を使用してNBLファイルを再エンコードし、ファイルサイズを削減します。Iフレームは完全なパーティクルスナップショットを保存し、Pフレームは前のフレームとの差分のみを保存することで冗長性を大幅に削減します。",
     "compress_warning": "この機能の意味が分からない場合は、操作しないでください。",
     "compress_keyframe_interval": "キーフレーム間隔",
