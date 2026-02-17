@@ -904,10 +904,8 @@ pub fn streaming_edit(
 
         previous_written_snapshot = current_written_snapshot;
 
-        if output_frame_idx % 10 == 0 || output_frame_idx == new_total_frames - 1 {
-            if let Ok(mut p) = progress.lock() {
-                p.current_frame = output_frame_idx + 1;
-            }
+        if let Ok(mut p) = progress.lock() {
+            p.current_frame = output_frame_idx + 1;
         }
     }
 

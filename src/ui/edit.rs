@@ -800,12 +800,10 @@ impl NebulaToolsApp {
                 });
 
                 ui.scope(|ui| {
-                    ui.style_mut().visuals.extreme_bg_color = egui::Color32::from_gray(15);
+                    ui.style_mut().visuals.extreme_bg_color = egui::Color32::from_gray(150);
                     ui.add_sized(
                         [ui.available_width(), 16.0],
-                        egui::ProgressBar::new(fraction)
-                            .animate(true)
-                            .fill(egui::Color32::from_gray(128)),
+                        egui::ProgressBar::new(fraction).animate(true).fill(ACCENT),
                     );
                 });
 

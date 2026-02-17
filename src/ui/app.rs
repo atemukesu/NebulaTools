@@ -102,7 +102,7 @@ impl Default for EditState {
             decoded_frames: None,
             edited_header: None,
             compress_keyframe_interval: 60,
-            compress_zstd_level: 3,
+            compress_zstd_level: 1,
             compress_progress: None,
         }
     }
