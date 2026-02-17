@@ -148,5 +148,5 @@
     "compress_zstd_level": "Zstd 圧縮レベル",
     "compress_zstd_level_desc": "レベルが高い = 圧縮率が良いがエンコードが遅い。範囲: 1-5。",
     "compress_export": "圧縮 .nbl をエクスポート",
-    "compress_progress": "圧縮中..."
+    "compress_progress": "処理中..."
 }
