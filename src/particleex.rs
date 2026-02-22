@@ -15,8 +15,8 @@ const TIME_SCALE: f64 = 3.0;
 
 // ─────────────────────── Expression Language ───────────────────────
 
-#[derive(Debug, Clone)]
-enum Token {
+#[derive(Debug, Clone, PartialEq)]
+pub enum Token {
     Num(f64),
     Ident(String),
     Op(char), // single-char operator  + - * / % ^ , ; ( )
@@ -31,7 +31,7 @@ enum Token {
     Gt,       // >
 }
 
-fn tokenize(src: &str) -> Vec<Token> {
+pub fn tokenize(src: &str) -> Vec<Token> {
     let chars: Vec<char> = src.chars().collect();
     let len = chars.len();
     let mut i = 0;
@@ -142,7 +142,7 @@ fn tokenize(src: &str) -> Vec<Token> {
 // ─── AST ───
 
 #[derive(Debug, Clone)]
-enum Expr {
+pub enum Expr {
     Num(f64),
     Var(String),
     BinOp(Box<Expr>, BinOp, Box<Expr>),
@@ -154,7 +154,7 @@ enum Expr {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum BinOp {
+pub enum BinOp {
     Add,
     Sub,
     Mul,
@@ -362,13 +362,13 @@ impl Parser {
 // ─── Statement-level parser ───
 
 #[derive(Debug, Clone)]
-enum Stmt {
+pub enum Stmt {
     Assign(String, Expr),
     MultiAssign(Vec<String>, Vec<Expr>),
     ExprStmt(Expr),
 }
 
-fn parse_statements(tokens: Vec<Token>) -> Vec<Stmt> {
+pub fn parse_statements(tokens: Vec<Token>) -> Vec<Stmt> {
     // Split by semicolons first
     let mut groups: Vec<Vec<Token>> = Vec::new();
     let mut current: Vec<Token> = Vec::new();
@@ -451,23 +451,23 @@ pub struct ExprContext {
 }
 
 impl ExprContext {
-    fn new() -> Self {
+    pub fn new() -> Self {
         let mut vars = HashMap::new();
         vars.insert("PI".into(), PI);
         vars.insert("E".into(), E);
         Self { vars }
     }
 
-    fn get(&self, name: &str) -> f64 {
+    pub fn get(&self, name: &str) -> f64 {
         self.vars.get(name).copied().unwrap_or(0.0)
     }
 
-    fn set(&mut self, name: &str, val: f64) {
+    pub fn set(&mut self, name: &str, val: f64) {
         self.vars.insert(name.to_string(), val);
     }
 }
 
-fn eval_expr(expr: &Expr, ctx: &mut ExprContext) -> f64 {
+pub fn eval_expr(expr: &Expr, ctx: &mut ExprContext) -> f64 {
     match expr {
         Expr::Num(n) => *n,
         Expr::Var(name) => ctx.get(name),
@@ -651,7 +651,7 @@ fn eval_expr(expr: &Expr, ctx: &mut ExprContext) -> f64 {
     }
 }
 
-fn exec_stmts(stmts: &[Stmt], ctx: &mut ExprContext) {
+pub fn exec_stmts(stmts: &[Stmt], ctx: &mut ExprContext) {
     for stmt in stmts {
         match stmt {
             Stmt::Assign(name, expr) => {
@@ -673,7 +673,7 @@ fn exec_stmts(stmts: &[Stmt], ctx: &mut ExprContext) {
 }
 
 /// Compile an expression string into executable statements. Returns None if empty.
-fn compile_expr(src: &str) -> Option<Vec<Stmt>> {
+pub fn compile_expr(src: &str) -> Option<Vec<Stmt>> {
     let src = src.trim();
     if src.is_empty() || src == "null" {
         return None;

@@ -1,5 +1,3 @@
-// Matrix math utilities, extracted from the monolithic app.rs
-
 pub fn look_at(eye: [f32; 3], center: [f32; 3], up: [f32; 3]) -> [f32; 16] {
     let f = normalize([center[0] - eye[0], center[1] - eye[1], center[2] - eye[2]]);
     let s = normalize(cross(f, up));

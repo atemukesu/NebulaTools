@@ -16,6 +16,8 @@ pub enum AppMode {
     Preview,
     Create,
     Particleex,
+    Scene,
+    Multimedia,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -121,6 +123,7 @@ pub enum CreatorPreset {
 pub struct CreatorState {
     pub preset: CreatorPreset,
     pub config: EmitterConfig,
+    pub keyframes: std::collections::BTreeMap<u32, EmitterConfig>,
     pub preview_frames: Option<Vec<Vec<Particle>>>,
     pub preview_playing: bool,
     pub preview_frame_idx: i32,
@@ -133,11 +136,186 @@ impl Default for CreatorState {
         Self {
             preset: CreatorPreset::Fireworks,
             config: EmitterConfig::preset_fireworks(),
+            keyframes: std::collections::BTreeMap::new(),
             preview_frames: None,
             preview_playing: false,
             preview_frame_idx: 0,
             preview_timer: 0.0,
             status_msg: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum IntroPreset {
+    None,
+    FadeScale,
+    ScatterIn,
+    SlideUp,
+    ZoomIn,
+    SpinIn,
+    DropIn,
+}
+
+/// (i18n_key, default, min, max)
+pub type ParamDesc = (&'static str, f32, f32, f32);
+
+impl IntroPreset {
+    pub fn i18n_key(&self) -> &'static str {
+        match self {
+            IntroPreset::None => "anim_none",
+            IntroPreset::FadeScale => "anim_fade_scale",
+            IntroPreset::ScatterIn => "anim_scatter_in",
+            IntroPreset::SlideUp => "anim_slide_up",
+            IntroPreset::ZoomIn => "anim_zoom_in",
+            IntroPreset::SpinIn => "anim_spin_in",
+            IntroPreset::DropIn => "anim_drop_in",
+        }
+    }
+    pub fn param_info(&self) -> Vec<ParamDesc> {
+        match self {
+            IntroPreset::None | IntroPreset::FadeScale => vec![],
+            IntroPreset::ScatterIn => vec![("anim_p_spread", 5.0, 0.1, 50.0)],
+            IntroPreset::SlideUp => vec![("anim_p_distance", 3.0, 0.1, 30.0)],
+            IntroPreset::ZoomIn => vec![("anim_p_scale", 2.0, 1.01, 10.0)],
+            IntroPreset::SpinIn => vec![
+                ("anim_p_rotations", 2.0, 0.1, 10.0),
+                ("anim_p_radius", 3.0, 0.1, 20.0),
+            ],
+            IntroPreset::DropIn => vec![("anim_p_height", 5.0, 0.5, 30.0)],
+        }
+    }
+    pub fn all() -> Vec<IntroPreset> {
+        vec![
+            IntroPreset::None,
+            IntroPreset::FadeScale,
+            IntroPreset::ScatterIn,
+            IntroPreset::SlideUp,
+            IntroPreset::ZoomIn,
+            IntroPreset::SpinIn,
+            IntroPreset::DropIn,
+        ]
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum OutroPreset {
+    None,
+    FadeScale,
+    ScatterOut,
+    SlideDown,
+    Explode,
+    Vortex,
+    ZoomOut,
+}
+
+impl OutroPreset {
+    pub fn i18n_key(&self) -> &'static str {
+        match self {
+            OutroPreset::None => "anim_none",
+            OutroPreset::FadeScale => "anim_fade_scale",
+            OutroPreset::ScatterOut => "anim_scatter_out",
+            OutroPreset::SlideDown => "anim_slide_down",
+            OutroPreset::Explode => "anim_explode",
+            OutroPreset::Vortex => "anim_vortex",
+            OutroPreset::ZoomOut => "anim_zoom_out",
+        }
+    }
+    pub fn param_info(&self) -> Vec<ParamDesc> {
+        match self {
+            OutroPreset::None | OutroPreset::FadeScale => vec![],
+            OutroPreset::ScatterOut => vec![("anim_p_spread", 5.0, 0.1, 50.0)],
+            OutroPreset::SlideDown => vec![("anim_p_distance", 3.0, 0.1, 30.0)],
+            OutroPreset::Explode => vec![("anim_p_speed", 10.0, 0.5, 50.0)],
+            OutroPreset::Vortex => vec![
+                ("anim_p_rotations", 1.5, 0.1, 10.0),
+                ("anim_p_expansion", 2.0, 0.1, 20.0),
+            ],
+            OutroPreset::ZoomOut => vec![("anim_p_scale", 2.0, 1.01, 10.0)],
+        }
+    }
+    pub fn all() -> Vec<OutroPreset> {
+        vec![
+            OutroPreset::None,
+            OutroPreset::FadeScale,
+            OutroPreset::ScatterOut,
+            OutroPreset::SlideDown,
+            OutroPreset::Explode,
+            OutroPreset::Vortex,
+            OutroPreset::ZoomOut,
+        ]
+    }
+}
+
+pub struct MultimediaState {
+    pub mode: usize,
+    pub text_input: String,
+    pub font_name: String,
+    pub system_fonts: Vec<String>,
+    pub media_path: Option<String>,
+    pub target_fps: u16,
+    pub duration_secs: f32,
+    pub intro_duration: f32,
+    pub outro_duration: f32,
+    pub intro_preset: IntroPreset,
+    pub intro_params: [f32; 2],
+    pub outro_preset: OutroPreset,
+    pub outro_params: [f32; 2],
+    pub velocity_expr: String,
+    pub font_size: f32,
+    pub particle_size: f32,
+    pub density: f32,
+    pub particle_scale: f32,
+    pub status_msg: Option<String>,
+    pub processing_progress: Option<f32>,
+    pub is_processing: bool,
+    pub preview_frames: Option<Vec<Vec<crate::player::Particle>>>,
+    pub preview_playing: bool,
+    pub preview_frame_idx: i32,
+    pub preview_timer: f32,
+}
+
+impl MultimediaState {
+    pub fn reset_intro_params(&mut self) {
+        let info = self.intro_preset.param_info();
+        self.intro_params[0] = info.first().map(|p| p.1).unwrap_or(1.0);
+        self.intro_params[1] = info.get(1).map(|p| p.1).unwrap_or(0.0);
+    }
+    pub fn reset_outro_params(&mut self) {
+        let info = self.outro_preset.param_info();
+        self.outro_params[0] = info.first().map(|p| p.1).unwrap_or(1.0);
+        self.outro_params[1] = info.get(1).map(|p| p.1).unwrap_or(0.0);
+    }
+}
+
+impl Default for MultimediaState {
+    fn default() -> Self {
+        Self {
+            mode: 0,
+            text_input: "Nebula".to_string(),
+            font_name: String::new(),
+            system_fonts: Vec::new(),
+            media_path: None,
+            target_fps: 30,
+            duration_secs: 5.0,
+            intro_duration: 1.0,
+            outro_duration: 1.0,
+            intro_preset: IntroPreset::FadeScale,
+            intro_params: [1.0, 0.0],
+            outro_preset: OutroPreset::FadeScale,
+            outro_params: [1.0, 0.0],
+            velocity_expr: "vx=0; vy=0; vz=0".to_string(),
+            font_size: 48.0,
+            particle_size: 0.02,
+            density: 0.5,
+            particle_scale: 0.1,
+            status_msg: None,
+            processing_progress: None,
+            is_processing: false,
+            preview_frames: None,
+            preview_playing: false,
+            preview_frame_idx: 0,
+            preview_timer: 0.0,
         }
     }
 }
@@ -174,7 +352,6 @@ pub struct ParticleexState {
     pub fullscreen_entry: Option<usize>,
     pub confirm_delete: Option<usize>,
 }
-
 impl Default for ParticleexState {
     fn default() -> Self {
         Self {
@@ -188,6 +365,128 @@ impl Default for ParticleexState {
             show_help: false,
             fullscreen_entry: None,
             confirm_delete: None,
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct ParameterConfig {
+    pub is_polar: bool,
+    pub center: [f32; 3],
+    pub color: [u8; 4],
+    pub velocity: [f32; 3],
+    pub t_begin: f32,
+    pub t_end: f32,
+    pub t_step: f32,
+    pub expr: String,
+    pub velocity_expr: String,
+    pub lifespan: u32,
+}
+
+impl Default for ParameterConfig {
+    fn default() -> Self {
+        Self {
+            is_polar: false,
+            center: [0.0; 3],
+            color: [255; 4],
+            velocity: [0.0; 3],
+            t_begin: -10.0,
+            t_end: 10.0,
+            t_step: 0.1,
+            expr: "x=cos(t); y=sin(t); z=0".to_string(),
+            velocity_expr: "vx=0; vy=0; vz=0".to_string(),
+            lifespan: 200,
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
+pub enum SceneShapeType {
+    Line,
+    Plane,
+    Sphere,
+    Cube,
+    Cylinder,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct ShapeConfig {
+    pub shape_type: SceneShapeType,
+    pub origin: [f32; 3],
+    pub end_pos: [f32; 3], // for line
+    pub size: [f32; 3],    // for plane/cube/cylinder
+    pub radius: f32,       // for sphere/cylinder
+    pub count: u32,
+    pub velocity_expr: String,
+    pub color: [u8; 4],
+    pub lifespan: u32,
+}
+
+impl Default for ShapeConfig {
+    fn default() -> Self {
+        Self {
+            shape_type: SceneShapeType::Line,
+            origin: [0.0; 3],
+            end_pos: [1.0, 0.0, 0.0],
+            size: [1.0, 1.0, 1.0],
+            radius: 1.0,
+            count: 20,
+            velocity_expr: "vx=0; vy=0.1; vz=0".to_string(),
+            color: [255; 4],
+            lifespan: 200,
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub enum SceneItemData {
+    Emitter(crate::editor::EmitterConfig),
+    Parameter(ParameterConfig),
+    Shape(ShapeConfig),
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct SceneItem {
+    pub name: String,
+    pub data: SceneItemData,
+    pub start_tick: f32,
+    pub position: [f32; 3],
+    pub enabled: bool,
+}
+
+impl Default for SceneItem {
+    fn default() -> Self {
+        Self {
+            name: "New Item".to_string(),
+            data: SceneItemData::Emitter(crate::editor::EmitterConfig::default()),
+            start_tick: 0.0,
+            position: [0.0; 3],
+            enabled: true,
+        }
+    }
+}
+pub struct SceneState {
+    pub items: Vec<SceneItem>,
+    pub preview_frames: Option<Vec<Vec<Particle>>>,
+    pub preview_playing: bool,
+    pub preview_frame_idx: i32,
+    pub preview_timer: f32,
+    pub preview_fps: u16,
+    pub status_msg: Option<String>,
+    pub selected_item: Option<usize>,
+}
+
+impl Default for SceneState {
+    fn default() -> Self {
+        Self {
+            items: Vec::new(),
+            preview_frames: None,
+            preview_playing: false,
+            preview_frame_idx: 0,
+            preview_timer: 0.0,
+            preview_fps: 30,
+            status_msg: None,
+            selected_item: None,
         }
     }
 }
@@ -208,6 +507,8 @@ pub struct NebulaToolsApp {
     pub edit: EditState,
     pub creator: CreatorState,
     pub pex: ParticleexState,
+    pub scene: SceneState,
+    pub multimedia: MultimediaState,
 }
 
 impl NebulaToolsApp {
@@ -237,6 +538,8 @@ impl NebulaToolsApp {
             edit: EditState::default(),
             creator: CreatorState::default(),
             pex: ParticleexState::default(),
+            scene: SceneState::default(),
+            multimedia: MultimediaState::default(),
         }
     }
 
@@ -412,6 +715,8 @@ impl eframe::App for NebulaToolsApp {
         if self.player.header.is_none()
             && self.mode != AppMode::Create
             && self.mode != AppMode::Particleex
+            && self.mode != AppMode::Scene
+            && self.mode != AppMode::Multimedia
         {
             self.show_welcome_screen(ctx);
             return;
@@ -442,6 +747,7 @@ impl eframe::App for NebulaToolsApp {
                     self.mode = AppMode::Preview;
                     self.player.header = None;
                     self.pex.preview_frames = None;
+                    self.scene.preview_frames = None;
                 }
                 ui.separator();
 
@@ -451,9 +757,19 @@ impl eframe::App for NebulaToolsApp {
                             self.export_creator_nbl();
                             ui.close_menu();
                         }
+                    } else if self.mode == AppMode::Multimedia {
+                        if ui.button(self.i18n.tr("export_nbl")).clicked() {
+                            self.export_multimedia_nbl();
+                            ui.close_menu();
+                        }
                     } else if self.mode == AppMode::Particleex {
                         if ui.button(self.i18n.tr("export_nbl")).clicked() {
                             self.export_particleex_nbl();
+                            ui.close_menu();
+                        }
+                    } else if self.mode == AppMode::Scene {
+                        if ui.button(self.i18n.tr("export_nbl")).clicked() {
+                            self.export_scene_nbl();
                             ui.close_menu();
                         }
                     } else {
@@ -480,6 +796,21 @@ impl eframe::App for NebulaToolsApp {
                     });
 
                 ui.separator();
+
+                // 1. Back to Home button (if in a tool mode and no file is being edited)
+                if self.player.header.is_none()
+                    && (self.mode == AppMode::Create
+                        || self.mode == AppMode::Particleex
+                        || self.mode == AppMode::Scene
+                        || self.mode == AppMode::Multimedia)
+                {
+                    if ui.button(format!("🏠 {}", self.i18n.tr("home"))).clicked() {
+                        self.mode = AppMode::Edit; // This will trigger welcome screen
+                    }
+                    ui.separator();
+                }
+
+                // 2. File-specific modes (only shown if a file is loaded)
                 if self.player.header.is_some() {
                     ui.selectable_value(&mut self.mode, AppMode::Edit, self.i18n.tr("edit_mode"));
                     ui.selectable_value(
@@ -487,10 +818,25 @@ impl eframe::App for NebulaToolsApp {
                         AppMode::Preview,
                         self.i18n.tr("preview_mode"),
                     );
-                } else if self.mode == AppMode::Create {
-                    ui.selectable_value(&mut self.mode, AppMode::Create, self.i18n.tr("creator"));
+                    ui.separator();
+                }
+
+                // 3. Current active Tool Mode display (Non-switchable while inside)
+                if self.mode == AppMode::Create {
+                    ui.label(
+                        egui::RichText::new(format!("✨ {}", self.i18n.tr("creator"))).strong(),
+                    );
                 } else if self.mode == AppMode::Particleex {
-                    ui.selectable_value(&mut self.mode, AppMode::Particleex, "Particleex");
+                    ui.label(egui::RichText::new("🔧 Particleex").strong());
+                } else if self.mode == AppMode::Scene {
+                    ui.label(
+                        egui::RichText::new(format!("🎬 {}", self.i18n.tr("scene_mode"))).strong(),
+                    );
+                } else if self.mode == AppMode::Multimedia {
+                    ui.label(
+                        egui::RichText::new(format!("📺 {}", self.i18n.tr("multimedia_mode")))
+                            .strong(),
+                    );
                 }
             });
         });
@@ -500,6 +846,8 @@ impl eframe::App for NebulaToolsApp {
             AppMode::Edit => self.show_edit_workflow(ctx),
             AppMode::Create => self.show_creator_workflow(ctx),
             AppMode::Particleex => self.show_particleex_workflow(ctx),
+            AppMode::Scene => self.show_scene_workflow(ctx),
+            AppMode::Multimedia => self.show_multimedia_workflow(ctx),
         }
     }
 

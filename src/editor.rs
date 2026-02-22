@@ -2,15 +2,19 @@
 /// Provides emitter presets and a simulation engine that generates
 /// `Vec<Vec<Particle>>` frame snapshots ready for NBL export.
 use crate::player::Particle;
+use serde::{Deserialize, Serialize};
 
 // ──── Emitter Shape ────
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EmitterShape {
     Point,
     Sphere,
     Box,
     Ring,
+    Cylinder,
+    Cone,
+    Torus,
 }
 
 impl EmitterShape {
@@ -20,25 +24,32 @@ impl EmitterShape {
             Self::Sphere => "shape_sphere",
             Self::Box => "shape_box",
             Self::Ring => "shape_ring",
+            Self::Cylinder => "shape_cylinder",
+            Self::Cone => "shape_cone",
+            Self::Torus => "shape_torus",
         }
     }
 
-    pub const ALL: [EmitterShape; 4] = [
+    pub const ALL: [EmitterShape; 7] = [
         EmitterShape::Point,
         EmitterShape::Sphere,
         EmitterShape::Box,
         EmitterShape::Ring,
+        EmitterShape::Cylinder,
+        EmitterShape::Cone,
+        EmitterShape::Torus,
     ];
 }
 
 // ──── Emitter Config ────
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct EmitterConfig {
     // Shape
     pub shape: EmitterShape,
     pub shape_radius: f32,
     pub shape_box_size: [f32; 3],
+    pub surface_only: bool, // Spawns on the surface of the shape instead of inside
 
     // Emission
     pub emission_rate: f32, // particles per second
@@ -76,6 +87,7 @@ impl Default for EmitterConfig {
             shape: EmitterShape::Point,
             shape_radius: 1.0,
             shape_box_size: [2.0, 2.0, 2.0],
+            surface_only: false,
             emission_rate: 50.0,
             burst_count: 0,
             burst_only: false,
@@ -266,8 +278,83 @@ impl SimpleRng {
     }
 }
 
+pub fn interpolate_config(a: &EmitterConfig, b: &EmitterConfig, t: f32) -> EmitterConfig {
+    EmitterConfig {
+        shape: a.shape,
+        shape_radius: a.shape_radius + (b.shape_radius - a.shape_radius) * t,
+        shape_box_size: [
+            a.shape_box_size[0] + (b.shape_box_size[0] - a.shape_box_size[0]) * t,
+            a.shape_box_size[1] + (b.shape_box_size[1] - a.shape_box_size[1]) * t,
+            a.shape_box_size[2] + (b.shape_box_size[2] - a.shape_box_size[2]) * t,
+        ],
+        surface_only: a.surface_only,
+        emission_rate: a.emission_rate + (b.emission_rate - a.emission_rate) * t,
+        burst_count: a.burst_count,
+        burst_only: a.burst_only,
+        lifetime_frames: a.lifetime_frames,
+        speed_min: a.speed_min + (b.speed_min - a.speed_min) * t,
+        speed_max: a.speed_max + (b.speed_max - a.speed_max) * t,
+        direction: [
+            a.direction[0] + (b.direction[0] - a.direction[0]) * t,
+            a.direction[1] + (b.direction[1] - a.direction[1]) * t,
+            a.direction[2] + (b.direction[2] - a.direction[2]) * t,
+        ],
+        spread: a.spread + (b.spread - a.spread) * t,
+        gravity: a.gravity + (b.gravity - a.gravity) * t,
+        drag: a.drag + (b.drag - a.drag) * t,
+        color_start: [
+            lerp_u8(a.color_start[0], b.color_start[0], t),
+            lerp_u8(a.color_start[1], b.color_start[1], t),
+            lerp_u8(a.color_start[2], b.color_start[2], t),
+            lerp_u8(a.color_start[3], b.color_start[3], t),
+        ],
+        color_end: [
+            lerp_u8(a.color_end[0], b.color_end[0], t),
+            lerp_u8(a.color_end[1], b.color_end[1], t),
+            lerp_u8(a.color_end[2], b.color_end[2], t),
+            lerp_u8(a.color_end[3], b.color_end[3], t),
+        ],
+        size_start: a.size_start + (b.size_start - a.size_start) * t,
+        size_end: a.size_end + (b.size_end - a.size_end) * t,
+        texture_id: a.texture_id,
+        target_fps: a.target_fps,
+        duration_secs: a.duration_secs,
+    }
+}
+
+pub fn get_config_at_frame(
+    frame: u32,
+    base: &EmitterConfig,
+    keyframes: &[(u32, EmitterConfig)],
+) -> EmitterConfig {
+    if keyframes.is_empty() {
+        return base.clone();
+    }
+
+    let mut prev = (0, base.clone());
+    let mut next = None;
+
+    for (kf_frame, kf_config) in keyframes {
+        if frame < *kf_frame {
+            next = Some((*kf_frame, kf_config.clone()));
+            break;
+        }
+        prev = (*kf_frame, kf_config.clone());
+    }
+
+    if let Some((next_frame, next_config)) = next {
+        if next_frame == prev.0 {
+            return prev.1;
+        }
+        let t = (frame - prev.0) as f32 / (next_frame - prev.0) as f32;
+        interpolate_config(&prev.1, &next_config, t)
+    } else {
+        prev.1
+    }
+}
+
 /// Run the full particle simulation and return frame snapshots.
-pub fn simulate(config: &EmitterConfig) -> Vec<Vec<Particle>> {
+pub fn simulate(config: &EmitterConfig, keyframes: &[(u32, EmitterConfig)]) -> Vec<Vec<Particle>> {
     let total_frames = (config.duration_secs * config.target_fps as f32).ceil() as u32;
     let dt = 1.0 / config.target_fps as f32;
     let mut rng = SimpleRng::new(42);
@@ -277,41 +364,43 @@ pub fn simulate(config: &EmitterConfig) -> Vec<Vec<Particle>> {
     let mut emit_accum: f32 = 0.0;
 
     for frame in 0..total_frames {
+        let current_config = get_config_at_frame(frame, config, keyframes);
+
         // 1. Emit new particles
         let emit_count = if frame == 0 {
-            config.burst_count
-        } else if config.burst_only {
+            current_config.burst_count
+        } else if current_config.burst_only {
             0
         } else {
-            emit_accum += config.emission_rate * dt;
+            emit_accum += current_config.emission_rate * dt;
             let n = emit_accum.floor() as u32;
             emit_accum -= n as f32;
             n
         };
 
         for _ in 0..emit_count {
-            let pos = spawn_position(config, &mut rng);
-            let vel = spawn_velocity(config, &mut rng, frame, total_frames);
+            let pos = spawn_position(&current_config, &mut rng);
+            let vel = spawn_velocity(&current_config, &mut rng, frame, total_frames);
             live.push(LiveParticle {
                 id: next_id,
                 pos,
                 vel,
                 birth_frame: frame,
-                lifetime: config.lifetime_frames,
-                color_start: config.color_start,
-                color_end: config.color_end,
-                size_start: config.size_start,
-                size_end: config.size_end,
-                tex_id: config.texture_id,
+                lifetime: current_config.lifetime_frames,
+                color_start: current_config.color_start,
+                color_end: current_config.color_end,
+                size_start: current_config.size_start,
+                size_end: current_config.size_end,
+                tex_id: current_config.texture_id,
             });
             next_id += 1;
         }
 
         // 2. Update physics
         for p in live.iter_mut() {
-            p.vel[1] += config.gravity * dt;
-            if config.drag > 0.0 {
-                let damp = 1.0 - config.drag;
+            p.vel[1] += current_config.gravity * dt;
+            if current_config.drag > 0.0 {
+                let damp = 1.0 - current_config.drag;
                 p.vel[0] *= damp;
                 p.vel[1] *= damp;
                 p.vel[2] *= damp;
@@ -363,7 +452,11 @@ fn spawn_position(config: &EmitterConfig, rng: &mut SimpleRng) -> [f32; 3] {
         EmitterShape::Sphere => {
             let theta = rng.range_f32(0.0, std::f32::consts::TAU);
             let phi = rng.range_f32(0.0, std::f32::consts::PI);
-            let r = rng.range_f32(0.0, config.shape_radius);
+            let r = if config.surface_only {
+                config.shape_radius
+            } else {
+                rng.range_f32(0.0, config.shape_radius)
+            };
             [
                 r * phi.sin() * theta.cos(),
                 r * phi.cos(),
@@ -372,11 +465,29 @@ fn spawn_position(config: &EmitterConfig, rng: &mut SimpleRng) -> [f32; 3] {
         }
         EmitterShape::Box => {
             let s = config.shape_box_size;
-            [
-                rng.range_f32(-s[0] / 2.0, s[0] / 2.0),
-                rng.range_f32(-s[1] / 2.0, s[1] / 2.0),
-                rng.range_f32(-s[2] / 2.0, s[2] / 2.0),
-            ]
+            if config.surface_only {
+                let face = rng.range_f32(0.0, 6.0) as u32;
+                let mut p = [
+                    rng.range_f32(-s[0] / 2.0, s[0] / 2.0),
+                    rng.range_f32(-s[1] / 2.0, s[1] / 2.0),
+                    rng.range_f32(-s[2] / 2.0, s[2] / 2.0),
+                ];
+                match face {
+                    0 => p[0] = s[0] / 2.0,
+                    1 => p[0] = -s[0] / 2.0,
+                    2 => p[1] = s[1] / 2.0,
+                    3 => p[1] = -s[1] / 2.0,
+                    4 => p[2] = s[2] / 2.0,
+                    _ => p[2] = -s[2] / 2.0,
+                }
+                p
+            } else {
+                [
+                    rng.range_f32(-s[0] / 2.0, s[0] / 2.0),
+                    rng.range_f32(-s[1] / 2.0, s[1] / 2.0),
+                    rng.range_f32(-s[2] / 2.0, s[2] / 2.0),
+                ]
+            }
         }
         EmitterShape::Ring => {
             let angle = rng.range_f32(0.0, std::f32::consts::TAU);
@@ -384,6 +495,59 @@ fn spawn_position(config: &EmitterConfig, rng: &mut SimpleRng) -> [f32; 3] {
                 config.shape_radius * angle.cos(),
                 0.0,
                 config.shape_radius * angle.sin(),
+            ]
+        }
+        EmitterShape::Cylinder => {
+            let theta = rng.range_f32(0.0, std::f32::consts::TAU);
+            let r = if config.surface_only {
+                config.shape_radius
+            } else {
+                rng.range_f32(0.0, config.shape_radius)
+            };
+            if config.surface_only && rng.next_f32() > 0.8 {
+                // caps
+                let r2 = rng.range_f32(0.0, config.shape_radius);
+                let cap = if rng.next_f32() > 0.5 { 1.0 } else { -1.0 };
+                [
+                    r2 * theta.cos(),
+                    cap * config.shape_box_size[1] / 2.0,
+                    r2 * theta.sin(),
+                ]
+            } else {
+                // tube
+                let h = rng.range_f32(
+                    -config.shape_box_size[1] / 2.0,
+                    config.shape_box_size[1] / 2.0,
+                );
+                [r * theta.cos(), h, r * theta.sin()]
+            }
+        }
+        EmitterShape::Cone => {
+            let theta = rng.range_f32(0.0, std::f32::consts::TAU);
+            let h = rng.range_f32(0.0, config.shape_box_size[1]);
+            let r_max = ((config.shape_box_size[1] - h).max(0.0)
+                / config.shape_box_size[1].max(0.001))
+                * config.shape_radius;
+            let r = if config.surface_only {
+                r_max
+            } else {
+                rng.range_f32(0.0, r_max)
+            };
+            [r * theta.cos(), h, r * theta.sin()]
+        }
+        EmitterShape::Torus => {
+            let theta = rng.range_f32(0.0, std::f32::consts::TAU);
+            let phi = rng.range_f32(0.0, std::f32::consts::TAU);
+            let tube_r = if config.surface_only {
+                config.shape_box_size[0]
+            } else {
+                rng.range_f32(0.0, config.shape_box_size[0])
+            };
+            let r_main = config.shape_radius;
+            [
+                (r_main + tube_r * phi.cos()) * theta.cos(),
+                tube_r * phi.sin(),
+                (r_main + tube_r * phi.cos()) * theta.sin(),
             ]
         }
     }
