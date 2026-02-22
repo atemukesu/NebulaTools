@@ -545,12 +545,20 @@ impl NebulaToolsApp {
                     let line_height = (ascent as i32 - descent).abs() as u32;
                     let line_gap: u32 = (line_height as f32 * 0.2).ceil() as u32;
 
-                    // Measure each line
+                    // 逐字符使用 h_advance 精确计算每行宽度
                     let mut max_w: u32 = 1;
                     for line in &lines {
-                        let measure = if line.is_empty() { " " } else { line };
-                        let (w, _h) = imageproc::drawing::text_size(px_scale, &font_ref, measure);
-                        max_w = max_w.max(w as u32);
+                        let mut w: f32 = 0.0;
+                        let mut prev_glyph: Option<ab_glyph::GlyphId> = None;
+                        for ch in line.chars() {
+                            let glyph_id = scale_font.glyph_id(ch);
+                            if let Some(prev) = prev_glyph {
+                                w += scale_font.kern(prev, glyph_id);
+                            }
+                            w += scale_font.h_advance(glyph_id);
+                            prev_glyph = Some(glyph_id);
+                        }
+                        max_w = max_w.max(w.ceil() as u32);
                     }
 
                     let pad = (self.multimedia.font_size * 0.5) as u32;
@@ -644,8 +652,8 @@ impl NebulaToolsApp {
                     let pixel = img.get_pixel(x, y);
 
                     let is_filtered = if mode == 0 {
-                        // 文字模式：形状由 Alpha 透明度决定
-                        (pixel[3] as f32 / 255.0) < self.multimedia.brightness_threshold
+                        // 文字模式：只看 Alpha，透明就跳过
+                        pixel[3] == 0
                     } else {
                         // 图片/视频模式：根据 RGB 亮度过滤
                         let luma = (pixel[0] as f32 * 0.299
