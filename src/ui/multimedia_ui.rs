@@ -334,20 +334,16 @@ impl NebulaToolsApp {
                 let pixels_per_char =
                     (self.multimedia.font_size * self.multimedia.font_size * 0.3) as u32;
 
-                let step = if density < 1.0 {
-                    (1.0 / density).ceil() as u32
-                } else {
-                    1u32
-                };
+                // Text mode uses probability sampling, not step-based skipping
+                let effective_density = if density < 1.0 { density } else { 1.0 };
                 let copies = if density >= 1.0 {
                     density.floor() as u32
                 } else {
                     1u32
                 };
 
-                (char_count as f32
-                    * (pixels_per_char as f32 / (step * step) as f32)
-                    * copies as f32) as usize
+                (char_count as f32 * pixels_per_char as f32 * effective_density * copies as f32)
+                    as usize
             }
             1 => {
                 // 图片模式：优先通过物理尺寸计算
@@ -537,7 +533,7 @@ impl NebulaToolsApp {
                 if let Ok(font_ref) = ab_glyph::FontRef::try_from_slice(&fd) {
                     let px_scale = PxScale::from(self.multimedia.font_size);
                     let scale_font = font_ref.as_scaled(px_scale);
-                    let lines: Vec<&str> = text.split('\n').collect();
+                    let lines: Vec<&str> = text.lines().collect();
 
                     // Use font metrics for reliable line height
                     let ascent = scale_font.ascent().ceil() as u32;
@@ -634,7 +630,11 @@ impl NebulaToolsApp {
             let density = self.multimedia.density.max(0.001);
 
             let mut id: i32 = 0;
-            let step = if density < 1.0 {
+            // Text mode (mode==0): always step=1, use random probability for density < 1.0
+            // Image mode: keep step-based skipping (grid sampling looks fine for images)
+            let step = if mode == 0 {
+                1u32
+            } else if density < 1.0 {
                 (1.0 / density).ceil() as u32
             } else {
                 1u32
@@ -664,6 +664,12 @@ impl NebulaToolsApp {
                     };
 
                     if is_filtered {
+                        continue;
+                    }
+
+                    // Text mode: use random probability sampling to preserve stroke integrity
+                    // instead of grid-based step skipping which causes hollow strokes
+                    if mode == 0 && density < 1.0 && rng.gen::<f32>() > density {
                         continue;
                     }
 
