@@ -321,28 +321,36 @@ impl NebulaToolsApp {
     fn estimate_multimedia_particles(&self) -> usize {
         let density = self.multimedia.density.max(0.001);
 
-        // If we have a cached size from a previous render/load, use it for perfect accuracy
-        if let Some([w, h]) = self.multimedia.last_source_size {
-            return self.count_particles(w, h, density);
-        }
-
         match self.multimedia.mode {
             0 => {
-                // Text: rough estimate
+                // 文本模式：基于当前输入字符串实时估算，不使用旧缓存
                 let char_count = self
                     .multimedia
                     .text_input
                     .chars()
                     .filter(|c| !c.is_whitespace())
                     .count();
+                // 估算渲染后的像素密度，font_size 是平方关系
                 let pixels_per_char =
-                    (self.multimedia.font_size * self.multimedia.font_size * 0.4) as u32;
-                // Since text image is cropped to fit, this is hard to estimate exactly without rendering.
-                // We'll assume a bounding box approach but text is usually sparse.
-                char_count * pixels_per_char as usize / 2 // Rough heuristic
+                    (self.multimedia.font_size * self.multimedia.font_size * 0.3) as u32;
+
+                let step = if density < 1.0 {
+                    (1.0 / density).ceil() as u32
+                } else {
+                    1u32
+                };
+                let copies = if density >= 1.0 {
+                    density.floor() as u32
+                } else {
+                    1u32
+                };
+
+                (char_count as f32
+                    * (pixels_per_char as f32 / (step * step) as f32)
+                    * copies as f32) as usize
             }
             1 => {
-                // Image
+                // 图片模式：优先通过物理尺寸计算
                 if let Some(path) = &self.multimedia.media_path {
                     if let Ok(reader) = image::ImageReader::open(path) {
                         if let Ok((w, h)) = reader.into_dimensions() {
@@ -361,20 +369,20 @@ impl NebulaToolsApp {
             ui.label(egui::RichText::new(self.i18n.tr("common_settings")).strong());
 
             ui.horizontal(|ui| {
-                ui.label(self.i18n.tr("particle_size"));
+                ui.label(self.i18n.tr("particle_size")); // 粒子组成的整体空间尺寸
                 ui.add(
                     egui::DragValue::new(&mut self.multimedia.particle_size)
-                        .speed(0.001)
-                        .clamp_range(0.001..=2.0),
+                        .speed(0.01)
+                        .clamp_range(0.001..=20.0),
                 );
             });
 
             ui.horizontal(|ui| {
-                ui.label(self.i18n.tr("particle_scale"));
+                ui.label(self.i18n.tr("point_size")); // 粒子个体粗细
                 ui.add(
-                    egui::DragValue::new(&mut self.multimedia.particle_scale)
-                        .speed(0.01)
-                        .clamp_range(0.01..=10.0),
+                    egui::DragValue::new(&mut self.multimedia.point_size)
+                        .speed(0.001)
+                        .clamp_range(0.001..=5.0),
                 );
             });
 
@@ -382,8 +390,8 @@ impl NebulaToolsApp {
                 ui.label(self.i18n.tr("density"));
                 ui.add(
                     egui::DragValue::new(&mut self.multimedia.density)
-                        .speed(0.01)
-                        .clamp_range(0.01..=100.0),
+                        .speed(0.1)
+                        .clamp_range(0.01..=1000.0),
                 );
             });
 
@@ -399,14 +407,6 @@ impl NebulaToolsApp {
                 ui.label(self.i18n.tr("duration_s"));
                 ui.add(egui::DragValue::new(&mut self.multimedia.duration_secs).speed(0.1));
             });
-
-            ui.separator();
-            let vol = self.multimedia.particle_size * self.multimedia.particle_scale;
-            ui.label(format!(
-                "{}: {:.6} (Size * Scale)",
-                self.i18n.tr("particle_volume_info"),
-                vol
-            ));
         });
     }
 
@@ -621,12 +621,11 @@ impl NebulaToolsApp {
             self.multimedia.last_source_size = Some([width, height]);
             let cx = width as f32 / 2.0;
             let cy = height as f32 / 2.0;
-            let dist_scale = self.multimedia.particle_scale;
+            // 粒子整体尺寸 (空间缩放系数)
+            let dist_scale = self.multimedia.particle_size;
             let density = self.multimedia.density.max(0.001);
 
             let mut id: i32 = 0;
-            // density < 1: skip pixels (step_by)
-            // density >= 1: create floor(density) particles per pixel with jitter
             let step = if density < 1.0 {
                 (1.0 / density).ceil() as u32
             } else {
@@ -644,17 +643,23 @@ impl NebulaToolsApp {
                 for x in (0..width).step_by(step as usize) {
                     let pixel = img.get_pixel(x, y);
 
-                    // Brightness check (Luma)
-                    let brightness = (pixel[0] as f32 * 0.299
-                        + pixel[1] as f32 * 0.587
-                        + pixel[2] as f32 * 0.114)
-                        / 255.0;
-                    if pixel[3] == 0 || brightness < self.multimedia.brightness_threshold {
+                    let is_filtered = if mode == 0 {
+                        // 文字模式：形状由 Alpha 透明度决定
+                        (pixel[3] as f32 / 255.0) < self.multimedia.brightness_threshold
+                    } else {
+                        // 图片/视频模式：根据 RGB 亮度过滤
+                        let luma = (pixel[0] as f32 * 0.299
+                            + pixel[1] as f32 * 0.587
+                            + pixel[2] as f32 * 0.114)
+                            / 255.0;
+                        pixel[3] == 0 || luma < self.multimedia.brightness_threshold
+                    };
+
+                    if is_filtered {
                         continue;
                     }
 
                     for c in 0..copies_per_pixel {
-                        // First copy at exact position, extras get sub-pixel jitter
                         let jx = if c == 0 {
                             0.0
                         } else {
@@ -671,7 +676,7 @@ impl NebulaToolsApp {
                             id,
                             pos: [px, py, 0.0],
                             color: [pixel[0], pixel[1], pixel[2], pixel[3]],
-                            size: self.multimedia.particle_size,
+                            size: self.multimedia.point_size, // 粒子个体粗细
                             tex_id: 0,
                             seq_index: 0,
                         });
