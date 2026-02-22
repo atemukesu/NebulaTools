@@ -1,5 +1,7 @@
 pub mod app;
 mod creator;
+mod creator_compile;
+mod creator_objects;
 mod edit;
 mod multimedia_ui;
 mod particleex_ui;

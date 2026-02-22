@@ -110,20 +110,98 @@ impl Default for EditState {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Copy)]
-pub enum CreatorPreset {
-    Fireworks,
-    Fountain,
-    Spiral,
-    Explosion,
-    Snow,
-    Custom,
+#[derive(Clone)]
+pub struct AnimKeyframe {
+    pub position: [f32; 3],
+    pub rotation: [f32; 3],
+    pub scale: [f32; 3],
+    pub alpha: f32,
+}
+
+impl Default for AnimKeyframe {
+    fn default() -> Self {
+        Self {
+            position: [0.0; 3],
+            rotation: [0.0; 3],
+            scale: [1.0, 1.0, 1.0],
+            alpha: 1.0,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct ImageTextConfig {
+    pub is_text: bool,
+    pub text_input: String,
+    pub font_name: String,
+    pub system_fonts: Vec<String>,
+    pub font_size: f32,
+    pub media_path: Option<String>,
+    pub density: f32,
+    pub particle_size: f32,
+    pub point_size: f32,
+    pub brightness_threshold: f32,
+}
+
+impl Default for ImageTextConfig {
+    fn default() -> Self {
+        Self {
+            is_text: false,
+            text_input: "Hello".to_string(),
+            font_name: String::new(),
+            system_fonts: Vec::new(),
+            font_size: 64.0,
+            media_path: None,
+            density: 0.5,
+            particle_size: 0.1,
+            point_size: 0.05,
+            brightness_threshold: 0.1,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub enum CreatorObjectData {
+    Emitter(EmitterConfig),
+    Shape(ShapeConfig),
+    Parameter(ParameterConfig),
+    ImageText(ImageTextConfig),
+}
+
+#[derive(Clone)]
+pub struct CreatorObject {
+    pub name: String,
+    pub enabled: bool,
+    pub position: [f32; 3],
+    pub rotation: [f32; 3],
+    pub scale: [f32; 3],
+    pub alpha: f32,
+    pub velocity_expr: String,
+    pub data: CreatorObjectData,
+    pub keyframes: std::collections::BTreeMap<u32, AnimKeyframe>,
+}
+
+impl Default for CreatorObject {
+    fn default() -> Self {
+        Self {
+            name: "Object".to_string(),
+            enabled: true,
+            position: [0.0; 3],
+            rotation: [0.0; 3],
+            scale: [1.0, 1.0, 1.0],
+            alpha: 1.0,
+            velocity_expr: "vx=0; vy=0; vz=0".to_string(),
+            data: CreatorObjectData::Emitter(EmitterConfig::default()),
+            keyframes: std::collections::BTreeMap::new(),
+        }
+    }
 }
 
 pub struct CreatorState {
-    pub preset: CreatorPreset,
-    pub config: EmitterConfig,
-    pub keyframes: std::collections::BTreeMap<u32, EmitterConfig>,
+    pub objects: Vec<CreatorObject>,
+    pub selected_object: Option<usize>,
+    pub target_fps: u16,
+    pub duration_secs: f32,
     pub preview_frames: Option<Vec<Vec<Particle>>>,
     pub preview_playing: bool,
     pub preview_frame_idx: i32,
@@ -134,9 +212,10 @@ pub struct CreatorState {
 impl Default for CreatorState {
     fn default() -> Self {
         Self {
-            preset: CreatorPreset::Fireworks,
-            config: EmitterConfig::preset_fireworks(),
-            keyframes: std::collections::BTreeMap::new(),
+            objects: Vec::new(),
+            selected_object: None,
+            target_fps: 30,
+            duration_secs: 5.0,
             preview_frames: None,
             preview_playing: false,
             preview_frame_idx: 0,
