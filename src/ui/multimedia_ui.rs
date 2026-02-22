@@ -41,7 +41,7 @@ impl NebulaToolsApp {
                                 ui.add(
                                     egui::DragValue::new(&mut self.multimedia.intro_duration)
                                         .speed(0.1)
-                                        .clamp_range(0.0..=10.0),
+                                        .clamp_range(0.0..=f32::MAX),
                                 );
                             });
                             // Intro Preset
@@ -80,7 +80,7 @@ impl NebulaToolsApp {
                                 ui.add(
                                     egui::DragValue::new(&mut self.multimedia.outro_duration)
                                         .speed(0.1)
-                                        .clamp_range(0.0..=10.0),
+                                        .clamp_range(0.0..=f32::MAX),
                                 );
                             });
                             // Outro Preset
@@ -369,7 +369,7 @@ impl NebulaToolsApp {
                 ui.add(
                     egui::DragValue::new(&mut self.multimedia.particle_size)
                         .speed(0.01)
-                        .clamp_range(0.001..=20.0),
+                        .clamp_range(0.001..=f32::MAX),
                 );
             });
 
@@ -378,7 +378,7 @@ impl NebulaToolsApp {
                 ui.add(
                     egui::DragValue::new(&mut self.multimedia.point_size)
                         .speed(0.001)
-                        .clamp_range(0.001..=5.0),
+                        .clamp_range(0.001..=f32::MAX),
                 );
             });
 
@@ -387,7 +387,7 @@ impl NebulaToolsApp {
                 ui.add(
                     egui::DragValue::new(&mut self.multimedia.density)
                         .speed(0.1)
-                        .clamp_range(0.01..=1000.0),
+                        .clamp_range(0.001..=f32::MAX),
                 );
             });
 
@@ -451,7 +451,7 @@ impl NebulaToolsApp {
             ui.add(
                 egui::DragValue::new(&mut self.multimedia.density)
                     .speed(0.01)
-                    .clamp_range(0.01..=1.0),
+                    .clamp_range(0.001..=f32::MAX),
             );
         });
         ui.label(

@@ -175,14 +175,14 @@ impl IntroPreset {
     pub fn param_info(&self) -> Vec<ParamDesc> {
         match self {
             IntroPreset::None | IntroPreset::FadeScale => vec![],
-            IntroPreset::ScatterIn => vec![("anim_p_spread", 5.0, 0.1, 50.0)],
-            IntroPreset::SlideUp => vec![("anim_p_distance", 3.0, 0.1, 30.0)],
-            IntroPreset::ZoomIn => vec![("anim_p_scale", 2.0, 1.01, 10.0)],
+            IntroPreset::ScatterIn => vec![("anim_p_spread", 5.0, 0.0, f32::MAX)],
+            IntroPreset::SlideUp => vec![("anim_p_distance", 3.0, 0.0, f32::MAX)],
+            IntroPreset::ZoomIn => vec![("anim_p_scale", 2.0, 0.01, f32::MAX)],
             IntroPreset::SpinIn => vec![
-                ("anim_p_rotations", 2.0, 0.1, 10.0),
-                ("anim_p_radius", 3.0, 0.1, 20.0),
+                ("anim_p_rotations", 2.0, 0.0, f32::MAX),
+                ("anim_p_radius", 3.0, 0.0, f32::MAX),
             ],
-            IntroPreset::DropIn => vec![("anim_p_height", 5.0, 0.5, 30.0)],
+            IntroPreset::DropIn => vec![("anim_p_height", 5.0, 0.0, f32::MAX)],
         }
     }
     pub fn all() -> Vec<IntroPreset> {
@@ -224,14 +224,14 @@ impl OutroPreset {
     pub fn param_info(&self) -> Vec<ParamDesc> {
         match self {
             OutroPreset::None | OutroPreset::FadeScale => vec![],
-            OutroPreset::ScatterOut => vec![("anim_p_spread", 5.0, 0.1, 50.0)],
-            OutroPreset::SlideDown => vec![("anim_p_distance", 3.0, 0.1, 30.0)],
-            OutroPreset::Explode => vec![("anim_p_speed", 10.0, 0.5, 50.0)],
+            OutroPreset::ScatterOut => vec![("anim_p_spread", 5.0, 0.0, f32::MAX)],
+            OutroPreset::SlideDown => vec![("anim_p_distance", 3.0, 0.0, f32::MAX)],
+            OutroPreset::Explode => vec![("anim_p_speed", 10.0, 0.0, f32::MAX)],
             OutroPreset::Vortex => vec![
-                ("anim_p_rotations", 1.5, 0.1, 10.0),
-                ("anim_p_expansion", 2.0, 0.1, 20.0),
+                ("anim_p_rotations", 1.5, 0.0, f32::MAX),
+                ("anim_p_expansion", 2.0, 0.0, f32::MAX),
             ],
-            OutroPreset::ZoomOut => vec![("anim_p_scale", 2.0, 1.01, 10.0)],
+            OutroPreset::ZoomOut => vec![("anim_p_scale", 2.0, 0.01, f32::MAX)],
         }
     }
     pub fn all() -> Vec<OutroPreset> {
