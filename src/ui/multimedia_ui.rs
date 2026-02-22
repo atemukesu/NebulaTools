@@ -319,7 +319,7 @@ impl NebulaToolsApp {
     }
 
     fn estimate_multimedia_particles(&self) -> usize {
-        let density = self.multimedia.density.max(0.001);
+        let density = self.multimedia.density.max(0.000001);
 
         match self.multimedia.mode {
             0 => {
@@ -368,8 +368,9 @@ impl NebulaToolsApp {
                 ui.label(self.i18n.tr("particle_size")); // 粒子组成的整体空间尺寸
                 ui.add(
                     egui::DragValue::new(&mut self.multimedia.particle_size)
-                        .speed(0.01)
-                        .clamp_range(0.001..=f32::MAX),
+                        .speed(0.001)
+                        .max_decimals(6)
+                        .clamp_range(0.000001..=f32::MAX),
                 );
             });
 
@@ -377,8 +378,9 @@ impl NebulaToolsApp {
                 ui.label(self.i18n.tr("point_size")); // 粒子个体粗细
                 ui.add(
                     egui::DragValue::new(&mut self.multimedia.point_size)
-                        .speed(0.001)
-                        .clamp_range(0.001..=f32::MAX),
+                        .speed(0.0001)
+                        .max_decimals(6)
+                        .clamp_range(0.000001..=f32::MAX),
                 );
             });
 
@@ -386,8 +388,9 @@ impl NebulaToolsApp {
                 ui.label(self.i18n.tr("density"));
                 ui.add(
                     egui::DragValue::new(&mut self.multimedia.density)
-                        .speed(0.1)
-                        .clamp_range(0.001..=f32::MAX),
+                        .speed(0.001)
+                        .max_decimals(6)
+                        .clamp_range(0.000001..=f32::MAX),
                 );
             });
 
@@ -450,8 +453,9 @@ impl NebulaToolsApp {
             ui.label(self.i18n.tr("density"));
             ui.add(
                 egui::DragValue::new(&mut self.multimedia.density)
-                    .speed(0.01)
-                    .clamp_range(0.001..=f32::MAX),
+                    .speed(0.001)
+                    .max_decimals(6)
+                    .clamp_range(0.000001..=f32::MAX),
             );
         });
         ui.label(
@@ -629,7 +633,7 @@ impl NebulaToolsApp {
             let cy = height as f32 / 2.0;
             // 粒子整体尺寸 (空间缩放系数)
             let dist_scale = self.multimedia.particle_size;
-            let density = self.multimedia.density.max(0.001);
+            let density = self.multimedia.density.max(0.000001);
 
             let mut id: i32 = 0;
             // Text mode (mode==0): always step=1, use random probability for density < 1.0

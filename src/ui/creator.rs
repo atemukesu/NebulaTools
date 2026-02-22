@@ -313,9 +313,9 @@ impl NebulaToolsApp {
                         ui.label(self.i18n.tr("anim_duration"));
                         ui.add(
                             egui::DragValue::new(&mut self.creator.config.duration_secs)
-                                .clamp_range(0.01..=36000.0)
-                                .speed(1.0)
-                                .fixed_decimals(1)
+                                .clamp_range(0.0001..=36000.0)
+                                .speed(0.1)
+                                .max_decimals(4)
                                 .suffix(" s"),
                         );
                     });

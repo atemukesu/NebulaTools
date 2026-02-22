@@ -422,9 +422,9 @@ impl NebulaToolsApp {
                 ui.label(egui::RichText::new("×").strong());
                 ui.add(
                     egui::DragValue::new(&mut self.edit.size_scale)
-                        .clamp_range(0.01..=100.0)
-                        .speed(0.05)
-                        .fixed_decimals(2),
+                        .clamp_range(0.000001..=100.0)
+                        .speed(0.001)
+                        .max_decimals(6),
                 );
             });
         });
@@ -497,18 +497,18 @@ impl NebulaToolsApp {
                 ui.label(egui::RichText::new(self.i18n.tr("brightness_factor")).strong());
                 ui.add(
                     egui::DragValue::new(&mut self.edit.brightness)
-                        .clamp_range(0.0..=5.0)
+                        .clamp_range(0.0..=f32::MAX)
                         .speed(0.01)
-                        .fixed_decimals(2),
+                        .max_decimals(4),
                 );
                 ui.end_row();
 
                 ui.label(egui::RichText::new(self.i18n.tr("opacity_factor")).strong());
                 ui.add(
                     egui::DragValue::new(&mut self.edit.opacity)
-                        .clamp_range(0.0..=5.0)
+                        .clamp_range(0.0..=f32::MAX)
                         .speed(0.01)
-                        .fixed_decimals(2),
+                        .max_decimals(4),
                 );
                 ui.end_row();
             });
@@ -559,9 +559,9 @@ impl NebulaToolsApp {
                 ui.label(egui::RichText::new(self.i18n.tr("position_scale")).strong());
                 ui.add(
                     egui::DragValue::new(&mut self.edit.pos_scale)
-                        .clamp_range(0.01..=100.0)
-                        .speed(0.01)
-                        .fixed_decimals(2),
+                        .clamp_range(0.000001..=100.0)
+                        .speed(0.001)
+                        .max_decimals(6),
                 );
                 ui.end_row();
             });
