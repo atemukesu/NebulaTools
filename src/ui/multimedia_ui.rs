@@ -756,7 +756,7 @@ impl NebulaToolsApp {
                     p.color[0] = (pex_ctx.get("cr").clamp(0.0, 1.0) * 255.0) as u8;
                     p.color[1] = (pex_ctx.get("cg").clamp(0.0, 1.0) * 255.0) as u8;
                     p.color[2] = (pex_ctx.get("cb").clamp(0.0, 1.0) * 255.0) as u8;
-                    p.color[3] = (p.color[3] as f64 * pex_ctx.get("alpha").clamp(0.0, 1.0)) as u8;
+                    p.color[3] = (pex_ctx.get("alpha").clamp(0.0, 1.0) * 255.0) as u8;
                     p.size = pex_ctx.get("mpsize") as f32;
                 }
 
