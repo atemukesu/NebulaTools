@@ -557,20 +557,22 @@ impl NebulaToolsApp {
                         max_w = max_w.max(w.ceil() as u32);
                     }
 
-                    let pad = (self.multimedia.font_size * 0.5) as u32;
-                    let canvas_w = max_w + pad * 2;
+                    // 修复：将 pad 扩大，给予极其充裕的画布安全区
+                    let pad = self.multimedia.font_size as u32;
+                    let canvas_w = max_w + pad * 4; // 左右留足空间，防止尾字被截断
                     let canvas_h = (lines.len() as u32 * line_height)
                         + ((lines.len() as u32).saturating_sub(1) * line_gap)
-                        + pad * 2;
+                        + pad * 4; // 上下也多给安全区，防止字母挂角被切
                     let mut text_img = image::RgbaImage::new(canvas_w, canvas_h);
 
-                    let mut cur_y = pad as i32;
+                    // 修复：起始绘制位置偏移，防止顶部/左侧超出画布
+                    let mut cur_y = (pad * 2) as i32;
                     for line in lines {
                         if !line.is_empty() {
                             imageproc::drawing::draw_text_mut(
                                 &mut text_img,
                                 image::Rgba([255, 255, 255, 255]),
-                                pad as i32,
+                                (pad * 2) as i32, // X 坐标也往右挪
                                 cur_y,
                                 px_scale,
                                 &font_ref,
@@ -652,8 +654,8 @@ impl NebulaToolsApp {
                     let pixel = img.get_pixel(x, y);
 
                     let is_filtered = if mode == 0 {
-                        // 文字模式：只看 Alpha，透明就跳过
-                        pixel[3] == 0
+                        // ⚠️ 修复：过滤掉 Alpha 小于 128 的半透明抗锯齿像素，让笔画干净利落
+                        pixel[3] < 128
                     } else {
                         // 图片/视频模式：根据 RGB 亮度过滤
                         let luma = (pixel[0] as f32 * 0.299
@@ -667,9 +669,10 @@ impl NebulaToolsApp {
                         continue;
                     }
 
-                    // Text mode: use random probability sampling to preserve stroke integrity
-                    // instead of grid-based step skipping which causes hollow strokes
-                    if mode == 0 && density < 1.0 && rng.gen::<f32>() > density {
+                    // ⚠️ 修复：只对图片/视频做随机像素丢弃，
+                    // 坚决不能对文字做随机像素丢弃，否则笔画必断！
+                    // 如果用户想减少文字粒子，应该去调小 Font Size。
+                    if mode != 0 && density < 1.0 && rng.gen::<f32>() > density {
                         continue;
                     }
 
