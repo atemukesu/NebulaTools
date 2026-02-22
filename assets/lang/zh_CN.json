@@ -232,5 +232,7 @@
     "expr_vars": "可用变量",
     "expr_funcs": "数学函数",
     "expr_vars_desc": "x, y, z (坐标), vx, vy (速度), id (粒子编号), cr, cg, cb (颜色), alpha (透明度), mpsize (大小), t (当前Tick)",
-    "expr_funcs_desc": "sin, cos, tan, abs, random, pow, sqrt, lerp, clamp... (使用分号 ; 分隔语句)"
+    "expr_funcs_desc": "sin, cos, tan, abs, random, pow, sqrt, lerp, clamp... (使用分号 ; 分隔语句)",
+    "brightness_threshold": "亮度阈值",
+    "source_preview": "媒体源码预览"
 }

@@ -173,5 +173,7 @@
     "anim_p_radius": "回転半径",
     "anim_p_height": "落下高度",
     "anim_p_speed": "爆発速度",
-    "anim_p_expansion": "拡散率"
+    "anim_p_expansion": "拡散率",
+    "brightness_threshold": "輝度閾値",
+    "source_preview": "ソースメディアプレビュー"
 }

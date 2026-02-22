@@ -232,5 +232,7 @@
     "expr_vars": "Variables",
     "expr_funcs": "Math Functions",
     "expr_vars_desc": "x, y, z (pos), vx, vy (vel), id (particle index), cr, cg, cb (color), alpha, mpsize (size), t (current tick)",
-    "expr_funcs_desc": "sin, cos, tan, abs, random, pow, sqrt, lerp, clamp... (Use ; to separate statements)"
+    "expr_funcs_desc": "sin, cos, tan, abs, random, pow, sqrt, lerp, clamp... (Use ; to separate statements)",
+    "brightness_threshold": "Brightness Threshold",
+    "source_preview": "Source Media Preview"
 }

@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufWriter, Cursor, Read, Seek, SeekFrom, Write};
@@ -29,7 +30,7 @@ pub struct TextureEntry {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Particle {
     pub id: i32,
     pub pos: [f32; 3],

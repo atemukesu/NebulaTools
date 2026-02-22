@@ -1,5 +1,6 @@
 use crate::player::{NblHeader, Particle};
 use crate::ui::app::NebulaToolsApp;
+use ab_glyph::{Font, PxScale, ScaleFont};
 use eframe::egui;
 use image::{DynamicImage, GenericImageView};
 use std::sync::{Arc, Mutex};
@@ -155,7 +156,7 @@ impl NebulaToolsApp {
                                 .clicked()
                                 && !self.multimedia.is_processing
                             {
-                                self.compile_multimedia_preview();
+                                self.compile_multimedia_preview(ctx);
                             }
                             if ui
                                 .button(format!("💾 {}", self.i18n.tr("export_nbl")))
@@ -173,6 +174,17 @@ impl NebulaToolsApp {
                                 egui::Color32::from_rgb(80, 200, 80)
                             };
                             ui.colored_label(color, msg);
+                        }
+
+                        // Intermediate Image Preview
+                        if let Some(tex) = &self.multimedia.source_image_preview {
+                            ui.add_space(8.0);
+                            ui.group(|ui| {
+                                ui.label(
+                                    egui::RichText::new(self.i18n.tr("source_preview")).strong(),
+                                );
+                                ui.add(egui::Image::new(tex).max_width(ui.available_width()));
+                            });
                         }
                     });
             });
@@ -255,6 +267,14 @@ impl NebulaToolsApp {
         ui.horizontal(|ui| {
             ui.label(self.i18n.tr("font_size"));
             ui.add(egui::DragValue::new(&mut self.multimedia.font_size).speed(1.0));
+        });
+
+        ui.horizontal(|ui| {
+            ui.label(self.i18n.tr("brightness_threshold"));
+            ui.add(
+                egui::Slider::new(&mut self.multimedia.brightness_threshold, 0.0..=1.0)
+                    .show_value(true),
+            );
         });
 
         ui.horizontal(|ui| {
@@ -390,6 +410,13 @@ impl NebulaToolsApp {
             );
         });
         ui.horizontal(|ui| {
+            ui.label(self.i18n.tr("brightness_threshold"));
+            ui.add(
+                egui::Slider::new(&mut self.multimedia.brightness_threshold, 0.0..=1.0)
+                    .show_value(true),
+            );
+        });
+        ui.horizontal(|ui| {
             ui.label(self.i18n.tr("duration_s"));
             ui.add(egui::DragValue::new(&mut self.multimedia.duration_secs).speed(0.1));
         });
@@ -461,10 +488,11 @@ impl NebulaToolsApp {
     // Core Multimedia Compilation Logic
     // ==========================================
 
-    fn compile_multimedia_preview(&mut self) {
+    fn compile_multimedia_preview(&mut self, ctx: &egui::Context) {
         self.multimedia.status_msg = Some("Compiling preview...".to_string());
 
         let mode = self.multimedia.mode;
+        self.multimedia.source_image_preview = None;
 
         let mut img: Option<DynamicImage> = None;
 
@@ -489,35 +517,35 @@ impl NebulaToolsApp {
                 font_data = std::fs::read(&self.multimedia.font_name).ok();
             }
 
-            // TODO: 无论如何调整密度，例子总数在一个非常小的值不变。例如几千。
             if let Some(fd) = font_data {
                 if let Ok(font_ref) = ab_glyph::FontRef::try_from_slice(&fd) {
-                    let px_scale = ab_glyph::PxScale::from(self.multimedia.font_size);
+                    let px_scale = PxScale::from(self.multimedia.font_size);
+                    let scale_font = font_ref.as_scaled(px_scale);
                     let lines: Vec<&str> = text.split('\n').collect();
-                    let line_gap: u32 = 4;
 
-                    // Measure each line with text_size
-                    let mut line_sizes: Vec<(u32, u32)> = Vec::new();
+                    // Use font metrics for reliable line height
+                    let ascent = scale_font.ascent().ceil() as u32;
+                    let descent = scale_font.descent().floor() as i32;
+                    let line_height = (ascent as i32 - descent).abs() as u32;
+                    let line_gap: u32 = (line_height as f32 * 0.2).ceil() as u32;
+
+                    // Measure each line
                     let mut max_w: u32 = 1;
-                    let mut total_h: u32 = 0;
                     for line in &lines {
                         let measure = if line.is_empty() { " " } else { line };
-                        let (w, h) = imageproc::drawing::text_size(px_scale, &font_ref, measure);
-                        let w = (w as u32).max(1);
-                        let h = (h as u32).max(1);
-                        line_sizes.push((w, h));
-                        max_w = max_w.max(w);
-                        total_h += h + line_gap;
+                        let (w, _h) = imageproc::drawing::text_size(px_scale, &font_ref, measure);
+                        max_w = max_w.max(w as u32);
                     }
 
-                    let pad = 10u32;
+                    let pad = (self.multimedia.font_size * 0.5) as u32;
                     let canvas_w = max_w + pad * 2;
-                    let canvas_h = total_h + pad * 2;
+                    let canvas_h = (lines.len() as u32 * line_height)
+                        + ((lines.len() as u32).saturating_sub(1) * line_gap)
+                        + pad * 2;
                     let mut text_img = image::RgbaImage::new(canvas_w, canvas_h);
 
-                    // draw_text_mut y = top-left of the glyph bounding box
                     let mut cur_y = pad as i32;
-                    for (i, line) in lines.iter().enumerate() {
+                    for line in lines {
                         if !line.is_empty() {
                             imageproc::drawing::draw_text_mut(
                                 &mut text_img,
@@ -529,11 +557,11 @@ impl NebulaToolsApp {
                                 line,
                             );
                         }
-                        cur_y += line_sizes[i].1 as i32 + line_gap as i32;
+                        cur_y += (line_height + line_gap) as i32;
                     }
                     img = Some(DynamicImage::ImageRgba8(text_img));
                 } else {
-                    self.multimedia.status_msg = Some("Failed to parse font for rendering".into());
+                    self.multimedia.status_msg = Some("Failed to parse font".into());
                     return;
                 }
             } else {
@@ -559,6 +587,14 @@ impl NebulaToolsApp {
         }
 
         if let Some(img) = img {
+            // Update source image preview texture
+            let size = [img.width() as usize, img.height() as usize];
+            let pixels = img.to_rgba8();
+            let color_img =
+                egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_flat_samples().as_slice());
+            self.multimedia.source_image_preview =
+                Some(ctx.load_texture("multimedia_source_preview", color_img, Default::default()));
+
             let mut base_particles = Vec::new();
             let (width, height) = img.dimensions();
             let cx = width as f32 / 2.0;
@@ -585,31 +621,39 @@ impl NebulaToolsApp {
             for y in (0..height).step_by(step as usize) {
                 for x in (0..width).step_by(step as usize) {
                     let pixel = img.get_pixel(x, y);
-                    if pixel[3] > 0 {
-                        for c in 0..copies_per_pixel {
-                            // First copy at exact position, extras get sub-pixel jitter
-                            let jx = if c == 0 {
-                                0.0
-                            } else {
-                                rng.gen_range(-0.5..0.5)
-                            };
-                            let jy = if c == 0 {
-                                0.0
-                            } else {
-                                rng.gen_range(-0.5..0.5)
-                            };
-                            let px = (x as f32 + jx - cx) * dist_scale;
-                            let py = -(y as f32 + jy - cy) * dist_scale;
-                            base_particles.push(Particle {
-                                id,
-                                pos: [px, py, 0.0],
-                                color: [pixel[0], pixel[1], pixel[2], pixel[3]],
-                                size: self.multimedia.particle_size,
-                                tex_id: 0,
-                                seq_index: 0,
-                            });
-                            id += 1;
-                        }
+
+                    // Brightness check (Luma)
+                    let brightness = (pixel[0] as f32 * 0.299
+                        + pixel[1] as f32 * 0.587
+                        + pixel[2] as f32 * 0.114)
+                        / 255.0;
+                    if pixel[3] == 0 || brightness < self.multimedia.brightness_threshold {
+                        continue;
+                    }
+
+                    for c in 0..copies_per_pixel {
+                        // First copy at exact position, extras get sub-pixel jitter
+                        let jx = if c == 0 {
+                            0.0
+                        } else {
+                            rng.gen_range(-0.5..0.5)
+                        };
+                        let jy = if c == 0 {
+                            0.0
+                        } else {
+                            rng.gen_range(-0.5..0.5)
+                        };
+                        let px = (x as f32 + jx - cx) * dist_scale;
+                        let py = -(y as f32 + jy - cy) * dist_scale;
+                        base_particles.push(Particle {
+                            id,
+                            pos: [px, py, 0.0],
+                            color: [pixel[0], pixel[1], pixel[2], pixel[3]],
+                            size: self.multimedia.particle_size,
+                            tex_id: 0,
+                            seq_index: 0,
+                        });
+                        id += 1;
                     }
                 }
             }

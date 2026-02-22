@@ -6,7 +6,7 @@ use eframe::{
     egui, egui_glow,
     glow::{self, HasContext},
 };
-use serde::{Deserialize, Serialize};
+use serde::{self, Deserialize, Serialize};
 use std::fs;
 use std::sync::{Arc, Mutex};
 
@@ -146,7 +146,7 @@ impl Default for CreatorState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum IntroPreset {
     None,
     FadeScale,
@@ -198,7 +198,7 @@ impl IntroPreset {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum OutroPreset {
     None,
     FadeScale,
@@ -247,6 +247,7 @@ impl OutroPreset {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct MultimediaState {
     pub mode: usize,
     pub text_input: String,
@@ -263,16 +264,20 @@ pub struct MultimediaState {
     pub outro_params: [f32; 2],
     pub velocity_expr: String,
     pub font_size: f32,
+    pub brightness_threshold: f32,
     pub particle_size: f32,
     pub density: f32,
     pub particle_scale: f32,
     pub status_msg: Option<String>,
     pub processing_progress: Option<f32>,
     pub is_processing: bool,
+    #[serde(skip)]
     pub preview_frames: Option<Vec<Vec<crate::player::Particle>>>,
     pub preview_playing: bool,
     pub preview_frame_idx: i32,
     pub preview_timer: f32,
+    #[serde(skip)]
+    pub source_image_preview: Option<egui::TextureHandle>,
 }
 
 impl MultimediaState {
@@ -306,6 +311,7 @@ impl Default for MultimediaState {
             outro_params: [1.0, 0.0],
             velocity_expr: "vx=0; vy=0; vz=0".to_string(),
             font_size: 48.0,
+            brightness_threshold: 0.1,
             particle_size: 0.02,
             density: 0.5,
             particle_scale: 0.1,
@@ -316,6 +322,7 @@ impl Default for MultimediaState {
             preview_playing: false,
             preview_frame_idx: 0,
             preview_timer: 0.0,
+            source_image_preview: None,
         }
     }
 }
