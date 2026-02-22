@@ -175,5 +175,12 @@
     "anim_p_speed": "爆発速度",
     "anim_p_expansion": "拡散率",
     "brightness_threshold": "輝度閾値",
-    "source_preview": "ソースメディアプレビュー"
+    "source_preview": "ソースメディアプレビュー",
+    "particle_size": "粒子サイズ",
+    "particle_scale": "粒子分布スケール",
+    "density": "粒子密度",
+    "estimated_count": "推定粒子数",
+    "common_settings": "共通パラメータ設定",
+    "refresh_source": "メディア源を更新",
+    "particle_volume_info": "粒子占有体積"
 }

@@ -278,6 +278,8 @@ pub struct MultimediaState {
     pub preview_timer: f32,
     #[serde(skip)]
     pub source_image_preview: Option<egui::TextureHandle>,
+    #[serde(skip)]
+    pub last_source_size: Option<[u32; 2]>,
 }
 
 impl MultimediaState {
@@ -323,6 +325,7 @@ impl Default for MultimediaState {
             preview_frame_idx: 0,
             preview_timer: 0.0,
             source_image_preview: None,
+            last_source_size: None,
         }
     }
 }

@@ -116,29 +116,7 @@ impl NebulaToolsApp {
                             ui.separator();
                             self.show_expression_editor(ui);
                             ui.separator();
-                            ui.horizontal(|ui| {
-                                ui.label(self.i18n.tr("edit_particle_size"));
-                                ui.add(
-                                    egui::DragValue::new(&mut self.multimedia.particle_size)
-                                        .speed(0.001),
-                                );
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label(self.i18n.tr("particle_scale"));
-                                ui.add(
-                                    egui::DragValue::new(&mut self.multimedia.particle_scale)
-                                        .speed(0.001)
-                                        .clamp_range(0.001..=1.0),
-                                );
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label(self.i18n.tr("density"));
-                                ui.add(
-                                    egui::DragValue::new(&mut self.multimedia.density)
-                                        .speed(0.01)
-                                        .clamp_range(0.001..=f32::MAX),
-                                );
-                            });
+                            self.show_multimedia_common_settings(ui);
                         });
 
                         ui.add_space(8.0);
@@ -152,11 +130,17 @@ impl NebulaToolsApp {
 
                         ui.horizontal(|ui| {
                             if ui
+                                .button(format!("🔄 {}", self.i18n.tr("refresh_source")))
+                                .clicked()
+                            {
+                                self.compile_multimedia_preview(ctx, true);
+                            }
+                            if ui
                                 .button(format!("▶ {}", self.i18n.tr("compile_preview")))
                                 .clicked()
                                 && !self.multimedia.is_processing
                             {
-                                self.compile_multimedia_preview(ctx);
+                                self.compile_multimedia_preview(ctx, false);
                             }
                             if ui
                                 .button(format!("💾 {}", self.i18n.tr("export_nbl")))
@@ -270,19 +254,6 @@ impl NebulaToolsApp {
         });
 
         ui.horizontal(|ui| {
-            ui.label(self.i18n.tr("brightness_threshold"));
-            ui.add(
-                egui::Slider::new(&mut self.multimedia.brightness_threshold, 0.0..=1.0)
-                    .show_value(true),
-            );
-        });
-
-        ui.horizontal(|ui| {
-            ui.label(self.i18n.tr("duration_s"));
-            ui.add(egui::DragValue::new(&mut self.multimedia.duration_secs).speed(0.1));
-        });
-
-        ui.horizontal(|ui| {
             if ui.button(self.i18n.tr("load_font")).clicked() {
                 if let Some(path) = rfd::FileDialog::new()
                     .add_filter("Fonts", &["ttf", "otf"])
@@ -331,12 +302,33 @@ impl NebulaToolsApp {
         }
     }
 
+    fn count_particles(&self, w: u32, h: u32, density: f32) -> usize {
+        let step = if density < 1.0 {
+            (1.0 / density).ceil() as u32
+        } else {
+            1u32
+        };
+        let copies_per_pixel = if density >= 1.0 {
+            density.floor() as u32
+        } else {
+            1u32
+        };
+        let nx = w / step;
+        let ny = h / step;
+        (nx * ny * copies_per_pixel) as usize
+    }
+
     fn estimate_multimedia_particles(&self) -> usize {
         let density = self.multimedia.density.max(0.001);
+
+        // If we have a cached size from a previous render/load, use it for perfect accuracy
+        if let Some([w, h]) = self.multimedia.last_source_size {
+            return self.count_particles(w, h, density);
+        }
+
         match self.multimedia.mode {
             0 => {
-                // Text: rough estimate based on font size and char count
-                // A char at font_size px is roughly font_size * font_size * 0.4 opaque pixels
+                // Text: rough estimate
                 let char_count = self
                     .multimedia
                     .text_input
@@ -344,42 +336,78 @@ impl NebulaToolsApp {
                     .filter(|c| !c.is_whitespace())
                     .count();
                 let pixels_per_char =
-                    (self.multimedia.font_size * self.multimedia.font_size * 0.4) as usize;
-                let total_opaque = char_count * pixels_per_char;
-                if density >= 1.0 {
-                    // density particles per pixel
-                    (total_opaque as f32 * density) as usize
-                } else {
-                    // step = 1/density, sampled in 2D
-                    let step = (1.0 / density) as usize;
-                    total_opaque / (step * step).max(1)
-                }
+                    (self.multimedia.font_size * self.multimedia.font_size * 0.4) as u32;
+                // Since text image is cropped to fit, this is hard to estimate exactly without rendering.
+                // We'll assume a bounding box approach but text is usually sparse.
+                char_count * pixels_per_char as usize / 2 // Rough heuristic
             }
             1 => {
                 // Image
                 if let Some(path) = &self.multimedia.media_path {
                     if let Ok(reader) = image::ImageReader::open(path) {
                         if let Ok((w, h)) = reader.into_dimensions() {
-                            // ~70% of pixels assumed opaque
-                            let total_opaque = ((w as f64 * h as f64) * 0.7) as usize;
-                            if density >= 1.0 {
-                                (total_opaque as f32 * density) as usize
-                            } else {
-                                let step = (1.0 / density) as usize;
-                                total_opaque / (step * step).max(1)
-                            }
-                        } else {
-                            0
+                            return self.count_particles(w, h, density);
                         }
-                    } else {
-                        0
                     }
-                } else {
-                    0
                 }
+                0
             }
             _ => 0,
         }
+    }
+
+    fn show_multimedia_common_settings(&mut self, ui: &mut egui::Ui) {
+        ui.group(|ui| {
+            ui.label(egui::RichText::new(self.i18n.tr("common_settings")).strong());
+
+            ui.horizontal(|ui| {
+                ui.label(self.i18n.tr("particle_size"));
+                ui.add(
+                    egui::DragValue::new(&mut self.multimedia.particle_size)
+                        .speed(0.001)
+                        .clamp_range(0.001..=2.0),
+                );
+            });
+
+            ui.horizontal(|ui| {
+                ui.label(self.i18n.tr("particle_scale"));
+                ui.add(
+                    egui::DragValue::new(&mut self.multimedia.particle_scale)
+                        .speed(0.01)
+                        .clamp_range(0.01..=10.0),
+                );
+            });
+
+            ui.horizontal(|ui| {
+                ui.label(self.i18n.tr("density"));
+                ui.add(
+                    egui::DragValue::new(&mut self.multimedia.density)
+                        .speed(0.01)
+                        .clamp_range(0.01..=100.0),
+                );
+            });
+
+            ui.horizontal(|ui| {
+                ui.label(self.i18n.tr("brightness_threshold"));
+                ui.add(egui::Slider::new(
+                    &mut self.multimedia.brightness_threshold,
+                    0.0..=1.0,
+                ));
+            });
+
+            ui.horizontal(|ui| {
+                ui.label(self.i18n.tr("duration_s"));
+                ui.add(egui::DragValue::new(&mut self.multimedia.duration_secs).speed(0.1));
+            });
+
+            ui.separator();
+            let vol = self.multimedia.particle_size * self.multimedia.particle_scale;
+            ui.label(format!(
+                "{}: {:.6} (Size * Scale)",
+                self.i18n.tr("particle_volume_info"),
+                vol
+            ));
+        });
     }
 
     fn show_image_ui(&mut self, ui: &mut egui::Ui) {
@@ -400,25 +428,6 @@ impl NebulaToolsApp {
                         .to_string_lossy(),
                 );
             }
-        });
-        ui.horizontal(|ui| {
-            ui.label(self.i18n.tr("density"));
-            ui.add(
-                egui::DragValue::new(&mut self.multimedia.density)
-                    .speed(0.01)
-                    .clamp_range(0.01..=1.0),
-            );
-        });
-        ui.horizontal(|ui| {
-            ui.label(self.i18n.tr("brightness_threshold"));
-            ui.add(
-                egui::Slider::new(&mut self.multimedia.brightness_threshold, 0.0..=1.0)
-                    .show_value(true),
-            );
-        });
-        ui.horizontal(|ui| {
-            ui.label(self.i18n.tr("duration_s"));
-            ui.add(egui::DragValue::new(&mut self.multimedia.duration_secs).speed(0.1));
         });
     }
 
@@ -488,8 +497,15 @@ impl NebulaToolsApp {
     // Core Multimedia Compilation Logic
     // ==========================================
 
-    fn compile_multimedia_preview(&mut self, ctx: &egui::Context) {
-        self.multimedia.status_msg = Some("Compiling preview...".to_string());
+    fn compile_multimedia_preview(&mut self, ctx: &egui::Context, source_only: bool) {
+        self.multimedia.status_msg = Some(
+            if source_only {
+                "Refreshing source..."
+            } else {
+                "Compiling preview..."
+            }
+            .to_string(),
+        );
 
         let mode = self.multimedia.mode;
         self.multimedia.source_image_preview = None;
@@ -595,8 +611,14 @@ impl NebulaToolsApp {
             self.multimedia.source_image_preview =
                 Some(ctx.load_texture("multimedia_source_preview", color_img, Default::default()));
 
+            if source_only {
+                self.multimedia.status_msg = Some("Source preview updated".into());
+                return;
+            }
+
             let mut base_particles = Vec::new();
             let (width, height) = img.dimensions();
+            self.multimedia.last_source_size = Some([width, height]);
             let cx = width as f32 / 2.0;
             let cy = height as f32 / 2.0;
             let dist_scale = self.multimedia.particle_scale;
