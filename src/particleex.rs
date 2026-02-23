@@ -127,6 +127,14 @@ pub fn tokenize(src: &str) -> Vec<Token> {
                 tokens.push(Token::Gt);
                 i += 1;
             }
+            '&' => {
+                tokens.push(Token::And);
+                i += 1;
+            }
+            '|' => {
+                tokens.push(Token::Or);
+                i += 1;
+            }
             '+' | '-' | '*' | '/' | '%' | '^' | '(' | ')' | ',' | ';' | '!' => {
                 tokens.push(Token::Op(c));
                 i += 1;
