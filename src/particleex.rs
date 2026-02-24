@@ -659,25 +659,28 @@ pub fn eval_expr(expr: &Expr, ctx: &mut ExprContext) -> f64 {
     }
 }
 
-pub fn exec_stmts(stmts: &[Stmt], ctx: &mut ExprContext) {
+pub fn exec_stmts(stmts: &[Stmt], ctx: &mut ExprContext) -> f64 {
+    let mut last_val = 0.0;
     for stmt in stmts {
-        match stmt {
+        last_val = match stmt {
             Stmt::Assign(name, expr) => {
                 let val = eval_expr(expr, ctx);
                 ctx.set(name, val);
+                val
             }
             Stmt::MultiAssign(names, exprs) => {
+                let mut v = 0.0;
                 let vals: Vec<f64> = exprs.iter().map(|e| eval_expr(e, ctx)).collect();
                 for (i, name) in names.iter().enumerate() {
-                    let val = vals.get(i).copied().unwrap_or(0.0);
-                    ctx.set(name, val);
+                    v = vals.get(i).copied().unwrap_or(0.0);
+                    ctx.set(name, v);
                 }
+                v
             }
-            Stmt::ExprStmt(expr) => {
-                let _ = eval_expr(expr, ctx);
-            }
-        }
+            Stmt::ExprStmt(expr) => eval_expr(expr, ctx),
+        };
     }
+    last_val
 }
 
 /// Compile an expression string into executable statements. Returns None if empty.
@@ -1098,11 +1101,7 @@ fn generate_tracks(cmd: &ParsedCommand, start_id: i32) -> (Vec<Track>, i32) {
 
                     // Evaluate condition: result ≠ 0 means spawn
                     let spawn = if let Some(ref stmts) = cond_stmts {
-                        exec_stmts(stmts, &mut ctx);
-                        // The last assignment or expression result
-                        // Check if any output changed or if condition is true
-                        // In particlex, the condition returns the last statement value
-                        true // If stmts execute without setting destory=1, spawn
+                        exec_stmts(stmts, &mut ctx) != 0.0
                     } else {
                         true
                     };
@@ -1246,7 +1245,7 @@ fn generate_tracks(cmd: &ParsedCommand, start_id: i32) -> (Vec<Track>, i32) {
             ctx.set("mpsize", 0.1);
             ctx.set("age", 0.0);
             ctx.set("t", 0.0);
-            ctx.set("destory", 0.0);
+            ctx.set("destroy", 0.0);
 
             let total_frames = (cmd.lifespan as f64 * TIME_SCALE).floor() as u32;
 
