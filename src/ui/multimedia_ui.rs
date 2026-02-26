@@ -3,6 +3,8 @@ use crate::ui::app::NebulaToolsApp;
 use ab_glyph::{Font, PxScale, ScaleFont};
 use eframe::egui;
 use image::{DynamicImage, GenericImageView};
+use std::io::Read;
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 
 impl NebulaToolsApp {
@@ -36,84 +38,91 @@ impl NebulaToolsApp {
                         // Shared Settings
                         ui.separator();
                         ui.collapsing(self.i18n.tr("animation_settings"), |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(self.i18n.tr("intro_duration"));
-                                ui.add(
-                                    egui::DragValue::new(&mut self.multimedia.intro_duration)
-                                        .speed(0.1)
-                                        .clamp_range(0.0..=f32::MAX),
-                                );
-                            });
-                            // Intro Preset
-                            let cur_intro = self.i18n.tr(self.multimedia.intro_preset.i18n_key());
-                            egui::ComboBox::from_label(self.i18n.tr("anim_intro"))
-                                .selected_text(cur_intro)
-                                .show_ui(ui, |ui| {
-                                    for preset in crate::ui::app::IntroPreset::all() {
-                                        let lbl = self.i18n.tr(preset.i18n_key());
-                                        let selected = &self.multimedia.intro_preset == &preset;
-                                        if ui.selectable_label(selected, lbl).clicked() {
-                                            self.multimedia.intro_preset = preset;
-                                            self.multimedia.reset_intro_params();
-                                        }
-                                    }
-                                });
-                            // Dynamic intro params
-                            {
-                                let info = self.multimedia.intro_preset.param_info();
-                                for (idx, (key, _default, min, max)) in info.iter().enumerate() {
-                                    ui.horizontal(|ui| {
-                                        ui.label(self.i18n.tr(key));
-                                        ui.add(
-                                            egui::DragValue::new(
-                                                &mut self.multimedia.intro_params[idx],
-                                            )
+                            // Intro/Outro only for text and image modes
+                            if self.multimedia.mode != 2 {
+                                ui.horizontal(|ui| {
+                                    ui.label(self.i18n.tr("intro_duration"));
+                                    ui.add(
+                                        egui::DragValue::new(&mut self.multimedia.intro_duration)
                                             .speed(0.1)
-                                            .clamp_range(*min..=*max),
-                                        );
-                                    });
-                                }
-                            }
-                            ui.separator();
-                            ui.horizontal(|ui| {
-                                ui.label(self.i18n.tr("outro_duration"));
-                                ui.add(
-                                    egui::DragValue::new(&mut self.multimedia.outro_duration)
-                                        .speed(0.1)
-                                        .clamp_range(0.0..=f32::MAX),
-                                );
-                            });
-                            // Outro Preset
-                            let cur_outro = self.i18n.tr(self.multimedia.outro_preset.i18n_key());
-                            egui::ComboBox::from_label(self.i18n.tr("anim_outro"))
-                                .selected_text(cur_outro)
-                                .show_ui(ui, |ui| {
-                                    for preset in crate::ui::app::OutroPreset::all() {
-                                        let lbl = self.i18n.tr(preset.i18n_key());
-                                        let selected = &self.multimedia.outro_preset == &preset;
-                                        if ui.selectable_label(selected, lbl).clicked() {
-                                            self.multimedia.outro_preset = preset;
-                                            self.multimedia.reset_outro_params();
-                                        }
-                                    }
+                                            .clamp_range(0.0..=f32::MAX),
+                                    );
                                 });
-                            // Dynamic outro params
-                            {
-                                let info = self.multimedia.outro_preset.param_info();
-                                for (idx, (key, _default, min, max)) in info.iter().enumerate() {
-                                    ui.horizontal(|ui| {
-                                        ui.label(self.i18n.tr(key));
-                                        ui.add(
-                                            egui::DragValue::new(
-                                                &mut self.multimedia.outro_params[idx],
-                                            )
-                                            .speed(0.1)
-                                            .clamp_range(*min..=*max),
-                                        );
+                                // Intro Preset
+                                let cur_intro =
+                                    self.i18n.tr(self.multimedia.intro_preset.i18n_key());
+                                egui::ComboBox::from_label(self.i18n.tr("anim_intro"))
+                                    .selected_text(cur_intro)
+                                    .show_ui(ui, |ui| {
+                                        for preset in crate::ui::app::IntroPreset::all() {
+                                            let lbl = self.i18n.tr(preset.i18n_key());
+                                            let selected = &self.multimedia.intro_preset == &preset;
+                                            if ui.selectable_label(selected, lbl).clicked() {
+                                                self.multimedia.intro_preset = preset;
+                                                self.multimedia.reset_intro_params();
+                                            }
+                                        }
                                     });
+                                // Dynamic intro params
+                                {
+                                    let info = self.multimedia.intro_preset.param_info();
+                                    for (idx, (key, _default, min, max)) in info.iter().enumerate()
+                                    {
+                                        ui.horizontal(|ui| {
+                                            ui.label(self.i18n.tr(key));
+                                            ui.add(
+                                                egui::DragValue::new(
+                                                    &mut self.multimedia.intro_params[idx],
+                                                )
+                                                .speed(0.1)
+                                                .clamp_range(*min..=*max),
+                                            );
+                                        });
+                                    }
                                 }
+                                ui.separator();
+                                ui.horizontal(|ui| {
+                                    ui.label(self.i18n.tr("outro_duration"));
+                                    ui.add(
+                                        egui::DragValue::new(&mut self.multimedia.outro_duration)
+                                            .speed(0.1)
+                                            .clamp_range(0.0..=f32::MAX),
+                                    );
+                                });
+                                // Outro Preset
+                                let cur_outro =
+                                    self.i18n.tr(self.multimedia.outro_preset.i18n_key());
+                                egui::ComboBox::from_label(self.i18n.tr("anim_outro"))
+                                    .selected_text(cur_outro)
+                                    .show_ui(ui, |ui| {
+                                        for preset in crate::ui::app::OutroPreset::all() {
+                                            let lbl = self.i18n.tr(preset.i18n_key());
+                                            let selected = &self.multimedia.outro_preset == &preset;
+                                            if ui.selectable_label(selected, lbl).clicked() {
+                                                self.multimedia.outro_preset = preset;
+                                                self.multimedia.reset_outro_params();
+                                            }
+                                        }
+                                    });
+                                // Dynamic outro params
+                                {
+                                    let info = self.multimedia.outro_preset.param_info();
+                                    for (idx, (key, _default, min, max)) in info.iter().enumerate()
+                                    {
+                                        ui.horizontal(|ui| {
+                                            ui.label(self.i18n.tr(key));
+                                            ui.add(
+                                                egui::DragValue::new(
+                                                    &mut self.multimedia.outro_params[idx],
+                                                )
+                                                .speed(0.1)
+                                                .clamp_range(*min..=*max),
+                                            );
+                                        });
+                                    }
+                                }
+                                ui.separator();
                             }
-                            ui.separator();
                             self.show_expression_editor(ui);
                             ui.separator();
                             self.show_multimedia_common_settings(ui);
@@ -146,7 +155,7 @@ impl NebulaToolsApp {
                                 .button(format!("💾 {}", self.i18n.tr("export_nbl")))
                                 .clicked()
                             {
-                                self.export_multimedia_nbl();
+                                self.export_multimedia_nbl(ctx);
                             }
                         });
 
@@ -213,6 +222,34 @@ impl NebulaToolsApp {
         // Central Canvas
         egui::CentralPanel::default().show(ctx, |ui| {
             if self.multimedia.is_processing {
+                // Poll shared state from video compile thread
+                if let Some((ref progress_arc, ref status_arc, ref done_arc, ref frames_arc)) =
+                    self.multimedia.video_compile_shared
+                {
+                    if let Ok(pct) = progress_arc.lock() {
+                        self.multimedia.processing_progress = Some(*pct);
+                    }
+                    let is_done = done_arc.lock().map(|d| *d).unwrap_or(false);
+                    if is_done {
+                        self.multimedia.is_processing = false;
+                        self.multimedia.processing_progress = None;
+                        if let Ok(status) = status_arc.lock() {
+                            self.multimedia.status_msg = status.clone();
+                        }
+                        // Pick up compiled frames
+                        if let Ok(mut frames_lock) = frames_arc.lock() {
+                            if let Some(frames) = frames_lock.take() {
+                                self.multimedia.preview_frames = Some(frames);
+                                self.multimedia.preview_playing = true;
+                                self.multimedia.preview_frame_idx = 0;
+                            }
+                        }
+                        self.multimedia.video_compile_shared = None;
+                    } else {
+                        ctx.request_repaint();
+                    }
+                }
+
                 ui.centered_and_justified(|ui| {
                     ui.vertical_centered(|ui| {
                         ui.add(egui::Spinner::new().size(40.0));
@@ -323,18 +360,15 @@ impl NebulaToolsApp {
 
         match self.multimedia.mode {
             0 => {
-                // 文本模式：基于当前输入字符串实时估算，不使用旧缓存
                 let char_count = self
                     .multimedia
                     .text_input
                     .chars()
                     .filter(|c| !c.is_whitespace())
                     .count();
-                // 估算渲染后的像素密度，font_size 是平方关系
                 let pixels_per_char =
                     (self.multimedia.font_size * self.multimedia.font_size * 0.3) as u32;
 
-                // Text mode uses probability sampling, not step-based skipping
                 let effective_density = if density < 1.0 { density } else { 1.0 };
                 let copies = if density >= 1.0 {
                     density.floor() as u32
@@ -346,7 +380,6 @@ impl NebulaToolsApp {
                     as usize
             }
             1 => {
-                // 图片模式：优先通过物理尺寸计算
                 if let Some(path) = &self.multimedia.media_path {
                     if let Ok(reader) = image::ImageReader::open(path) {
                         if let Ok((w, h)) = reader.into_dimensions() {
@@ -365,7 +398,7 @@ impl NebulaToolsApp {
             ui.label(egui::RichText::new(self.i18n.tr("common_settings")).strong());
 
             ui.horizontal(|ui| {
-                ui.label(self.i18n.tr("particle_size")); // 粒子组成的整体空间尺寸
+                ui.label(self.i18n.tr("particle_size"));
                 ui.add(
                     egui::DragValue::new(&mut self.multimedia.particle_size)
                         .speed(0.001)
@@ -375,7 +408,7 @@ impl NebulaToolsApp {
             });
 
             ui.horizontal(|ui| {
-                ui.label(self.i18n.tr("point_size")); // 粒子个体粗细
+                ui.label(self.i18n.tr("point_size"));
                 ui.add(
                     egui::DragValue::new(&mut self.multimedia.point_size)
                         .speed(0.0001)
@@ -449,15 +482,6 @@ impl NebulaToolsApp {
                 );
             }
         });
-        ui.horizontal(|ui| {
-            ui.label(self.i18n.tr("density"));
-            ui.add(
-                egui::DragValue::new(&mut self.multimedia.density)
-                    .speed(0.001)
-                    .max_decimals(6)
-                    .clamp_range(0.000001..=f32::MAX),
-            );
-        });
         ui.label(
             egui::RichText::new(self.i18n.tr("video_note"))
                 .small()
@@ -493,10 +517,6 @@ impl NebulaToolsApp {
         self.prepare_render_data_from(&frames[idx])
     }
 
-    // ==========================================
-    // Core Multimedia Compilation Logic
-    // ==========================================
-
     fn compile_multimedia_preview(&mut self, ctx: &egui::Context, source_only: bool) {
         self.multimedia.status_msg = Some(
             if source_only {
@@ -513,7 +533,6 @@ impl NebulaToolsApp {
         let mut img: Option<DynamicImage> = None;
 
         if mode == 0 {
-            // Text Mode
             let text = &self.multimedia.text_input;
             let mut font_data = None;
 
@@ -539,13 +558,11 @@ impl NebulaToolsApp {
                     let scale_font = font_ref.as_scaled(px_scale);
                     let lines: Vec<&str> = text.lines().collect();
 
-                    // Use font metrics for reliable line height
                     let ascent = scale_font.ascent().ceil() as u32;
                     let descent = scale_font.descent().floor() as i32;
                     let line_height = (ascent as i32 - descent).abs() as u32;
                     let line_gap: u32 = (line_height as f32 * 0.2).ceil() as u32;
 
-                    // 逐字符使用 h_advance 精确计算每行宽度
                     let mut max_w: u32 = 1;
                     for line in &lines {
                         let mut w: f32 = 0.0;
@@ -561,22 +578,20 @@ impl NebulaToolsApp {
                         max_w = max_w.max(w.ceil() as u32);
                     }
 
-                    // 修复：将 pad 扩大，给予极其充裕的画布安全区
-                    let pad = self.multimedia.font_size as u32;
-                    let canvas_w = max_w + pad * 4; // 左右留足空间，防止尾字被截断
+                    let pad = (self.multimedia.font_size as u32).max(1);
+                    let canvas_w = max_w + pad * 4;
                     let canvas_h = (lines.len() as u32 * line_height)
                         + ((lines.len() as u32).saturating_sub(1) * line_gap)
-                        + pad * 4; // 上下也多给安全区，防止字母挂角被切
+                        + pad * 4;
                     let mut text_img = image::RgbaImage::new(canvas_w, canvas_h);
 
-                    // 修复：起始绘制位置偏移，防止顶部/左侧超出画布
                     let mut cur_y = (pad * 2) as i32;
                     for line in lines {
                         if !line.is_empty() {
                             imageproc::drawing::draw_text_mut(
                                 &mut text_img,
                                 image::Rgba([255, 255, 255, 255]),
-                                (pad * 2) as i32, // X 坐标也往右挪
+                                (pad * 2) as i32,
                                 cur_y,
                                 px_scale,
                                 &font_ref,
@@ -595,7 +610,6 @@ impl NebulaToolsApp {
                 return;
             }
         } else if mode == 1 {
-            // Image Mode
             if let Some(path) = &self.multimedia.media_path {
                 if let Ok(loaded) = image::open(path) {
                     img = Some(loaded);
@@ -608,12 +622,54 @@ impl NebulaToolsApp {
                 return;
             }
         } else if mode == 2 {
-            self.multimedia.status_msg = Some("Video ready to export!".to_string());
-            return;
+            // Video Mode: Extract first frame for source preview
+            if let Some(path) = &self.multimedia.media_path {
+                let output = Command::new("ffmpeg")
+                    .args([
+                        "-i",
+                        path,
+                        "-vframes",
+                        "1",
+                        "-f",
+                        "image2pipe",
+                        "-vcodec",
+                        "png",
+                        "-",
+                    ])
+                    .output();
+
+                if let Ok(out) = output {
+                    if let Ok(loaded) = image::load_from_memory(&out.stdout) {
+                        // Show source preview from first frame
+                        let size = [loaded.width() as usize, loaded.height() as usize];
+                        let pixels = loaded.to_rgba8();
+                        let color_img = egui::ColorImage::from_rgba_unmultiplied(
+                            size,
+                            pixels.as_flat_samples().as_slice(),
+                        );
+                        self.multimedia.source_image_preview = Some(ctx.load_texture(
+                            "multimedia_source_preview",
+                            color_img,
+                            Default::default(),
+                        ));
+                    }
+                }
+
+                if source_only {
+                    self.multimedia.status_msg = Some("Source preview updated".into());
+                    return;
+                }
+
+                // Compile all video frames in background thread
+                self.compile_video_all_frames(ctx);
+                return;
+            } else {
+                self.multimedia.status_msg = Some("No Video selected".into());
+                return;
+            }
         }
 
         if let Some(img) = img {
-            // Update source image preview texture
             let size = [img.width() as usize, img.height() as usize];
             let pixels = img.to_rgba8();
             let color_img =
@@ -631,13 +687,10 @@ impl NebulaToolsApp {
             self.multimedia.last_source_size = Some([width, height]);
             let cx = width as f32 / 2.0;
             let cy = height as f32 / 2.0;
-            // 粒子整体尺寸 (空间缩放系数)
             let dist_scale = self.multimedia.particle_size;
             let density = self.multimedia.density.max(0.000001);
 
             let mut id: i32 = 0;
-            // Text mode (mode==0): always step=1, use random probability for density < 1.0
-            // Image mode: keep step-based skipping (grid sampling looks fine for images)
             let step = if mode == 0 {
                 1u32
             } else if density < 1.0 {
@@ -658,10 +711,8 @@ impl NebulaToolsApp {
                     let pixel = img.get_pixel(x, y);
 
                     let is_filtered = if mode == 0 {
-                        // ⚠️ 修复：过滤掉 Alpha 小于 128 的半透明抗锯齿像素，让笔画干净利落
                         pixel[3] < 128
                     } else {
-                        // 图片/视频模式：根据 RGB 亮度过滤
                         let luma = (pixel[0] as f32 * 0.299
                             + pixel[1] as f32 * 0.587
                             + pixel[2] as f32 * 0.114)
@@ -673,9 +724,6 @@ impl NebulaToolsApp {
                         continue;
                     }
 
-                    // ⚠️ 修复：只对图片/视频做随机像素丢弃，
-                    // 坚决不能对文字做随机像素丢弃，否则笔画必断！
-                    // 如果用户想减少文字粒子，应该去调小 Font Size。
                     if mode != 0 && density < 1.0 && rng.gen::<f32>() > density {
                         continue;
                     }
@@ -697,7 +745,7 @@ impl NebulaToolsApp {
                             id,
                             pos: [px, py, 0.0],
                             color: [pixel[0], pixel[1], pixel[2], pixel[3]],
-                            size: self.multimedia.point_size, // 粒子个体粗细
+                            size: self.multimedia.point_size,
                             tex_id: 0,
                             seq_index: 0,
                         });
@@ -713,7 +761,6 @@ impl NebulaToolsApp {
             let outro_frames =
                 (self.multimedia.outro_duration * self.multimedia.target_fps as f32) as usize;
 
-            // Compile Particleex statements
             let stmts = crate::particleex::compile_expr(&self.multimedia.velocity_expr);
 
             let mut frames = Vec::with_capacity(total_frames);
@@ -724,7 +771,6 @@ impl NebulaToolsApp {
 
                 for p in runtime_particles.iter_mut() {
                     let mut pex_ctx = crate::particleex::ExprContext::new();
-                    // Set inputs (Normalized to 0.0-1.0 for colors to match Pex logic)
                     pex_ctx.set("t", t);
                     pex_ctx.set("x", p.pos[0] as f64);
                     pex_ctx.set("y", p.pos[1] as f64);
@@ -739,16 +785,14 @@ impl NebulaToolsApp {
                     pex_ctx.set("vz", 0.0);
                     pex_ctx.set("destory", 0.0);
 
-                    // Execute statements
                     if let Some(ref s) = stmts {
                         crate::particleex::exec_stmts(s, &mut pex_ctx);
                     }
 
                     if pex_ctx.get("destory") >= 1.0 {
-                        p.color[3] = 0; // effectively hide it
+                        p.color[3] = 0;
                     }
 
-                    // Read back (Update velocity -> position)
                     let vx = pex_ctx.get("vx") as f32;
                     let vy = pex_ctx.get("vy") as f32;
                     let vz = pex_ctx.get("vz") as f32;
@@ -764,13 +808,12 @@ impl NebulaToolsApp {
                     p.size = pex_ctx.get("mpsize") as f32;
                 }
 
-                // Apply Intro/Outro effects (per preset)
                 let mut frame_particles = runtime_particles.clone();
                 use crate::ui::app::{IntroPreset, OutroPreset};
 
                 if f_idx < intro_frames && intro_frames > 0 {
                     let t_raw = f_idx as f32 / intro_frames as f32;
-                    let t = t_raw * t_raw * (3.0 - 2.0 * t_raw); // smoothstep
+                    let t = t_raw * t_raw * (3.0 - 2.0 * t_raw);
                     let p0 = self.multimedia.intro_params[0];
                     let p1 = self.multimedia.intro_params[1];
                     match self.multimedia.intro_preset {
@@ -782,7 +825,6 @@ impl NebulaToolsApp {
                             }
                         }
                         IntroPreset::ScatterIn => {
-                            // p0 = spread distance
                             let spread = (1.0 - t) * p0;
                             for (i, p) in frame_particles.iter_mut().enumerate() {
                                 let angle = (i as f32 * 2.39996) * std::f32::consts::PI;
@@ -792,7 +834,6 @@ impl NebulaToolsApp {
                             }
                         }
                         IntroPreset::SlideUp => {
-                            // p0 = slide distance
                             let offset = (1.0 - t) * -p0;
                             for p in frame_particles.iter_mut() {
                                 p.pos[1] += offset;
@@ -800,7 +841,6 @@ impl NebulaToolsApp {
                             }
                         }
                         IntroPreset::ZoomIn => {
-                            // p0 = initial scale
                             let scale_factor = 1.0 + (1.0 - t) * (p0 - 1.0);
                             for p in frame_particles.iter_mut() {
                                 p.size *= scale_factor;
@@ -808,7 +848,6 @@ impl NebulaToolsApp {
                             }
                         }
                         IntroPreset::SpinIn => {
-                            // p0 = rotations, p1 = radius
                             let angle = (1.0 - t) * std::f32::consts::TAU * p0;
                             let cos_a = angle.cos();
                             let sin_a = angle.sin();
@@ -822,7 +861,6 @@ impl NebulaToolsApp {
                             }
                         }
                         IntroPreset::DropIn => {
-                            // p0 = drop height
                             let offset = (1.0 - t) * p0;
                             for p in frame_particles.iter_mut() {
                                 p.pos[1] += offset;
@@ -833,7 +871,7 @@ impl NebulaToolsApp {
                     }
                 } else if f_idx > total_frames.saturating_sub(outro_frames) && outro_frames > 0 {
                     let t_raw = (total_frames - f_idx) as f32 / outro_frames as f32;
-                    let t = t_raw * (2.0 - t_raw); // ease out quad
+                    let t = t_raw * (2.0 - t_raw);
                     let p0 = self.multimedia.outro_params[0];
                     let p1 = self.multimedia.outro_params[1];
                     match self.multimedia.outro_preset {
@@ -845,7 +883,6 @@ impl NebulaToolsApp {
                             }
                         }
                         OutroPreset::ScatterOut => {
-                            // p0 = spread distance
                             let spread = (1.0 - t) * p0;
                             for (i, p) in frame_particles.iter_mut().enumerate() {
                                 let angle = (i as f32 * 2.39996) * std::f32::consts::PI;
@@ -855,7 +892,6 @@ impl NebulaToolsApp {
                             }
                         }
                         OutroPreset::SlideDown => {
-                            // p0 = slide distance
                             let offset = (1.0 - t) * p0;
                             for p in frame_particles.iter_mut() {
                                 p.pos[1] -= offset;
@@ -863,7 +899,6 @@ impl NebulaToolsApp {
                             }
                         }
                         OutroPreset::Explode => {
-                            // p0 = explosion speed
                             let speed = (1.0 - t) * p0;
                             for (i, p) in frame_particles.iter_mut().enumerate() {
                                 let angle = (i as f32 * 2.39996) * std::f32::consts::PI;
@@ -876,7 +911,6 @@ impl NebulaToolsApp {
                             }
                         }
                         OutroPreset::Vortex => {
-                            // p0 = rotations, p1 = expansion
                             let angle = (1.0 - t) * std::f32::consts::TAU * p0;
                             let cos_a = angle.cos();
                             let sin_a = angle.sin();
@@ -890,7 +924,6 @@ impl NebulaToolsApp {
                             }
                         }
                         OutroPreset::ZoomOut => {
-                            // p0 = scale factor
                             let scale_factor = 1.0 + (1.0 - t) * (p0 - 1.0);
                             for p in frame_particles.iter_mut() {
                                 p.pos[0] *= scale_factor;
@@ -911,40 +944,35 @@ impl NebulaToolsApp {
         }
     }
 
-    pub fn export_multimedia_nbl(&mut self) {
-        if self.multimedia.mode == 2 {
-            self.export_video_streaming();
-        } else {
-            // General export
-            if let Some(frames) = &self.multimedia.preview_frames {
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("Nebula", &["nbl"])
-                    .save_file()
-                {
-                    let (bbox_min, bbox_max) = crate::player::recalculate_bbox(frames);
-                    let header = NblHeader {
-                        version: 1,
-                        target_fps: self.multimedia.target_fps,
-                        total_frames: frames.len() as u32,
-                        texture_count: 0,
-                        attributes: 0x03,
-                        bbox_min,
-                        bbox_max,
-                    };
+    pub fn export_multimedia_nbl(&mut self, _ctx: &egui::Context) {
+        if let Some(frames) = &self.multimedia.preview_frames {
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("Nebula", &["nbl"])
+                .save_file()
+            {
+                let (bbox_min, bbox_max) = crate::player::recalculate_bbox(frames);
+                let header = NblHeader {
+                    version: 1,
+                    target_fps: self.multimedia.target_fps,
+                    total_frames: frames.len() as u32,
+                    texture_count: 0,
+                    attributes: 0x03,
+                    bbox_min,
+                    bbox_max,
+                };
 
-                    match self.player.save_file(&path, &header, &[], frames) {
-                        Ok(_) => self.multimedia.status_msg = Some("Export success!".into()),
-                        Err(e) => {
-                            self.multimedia.status_msg = Some(format!("Export failed: {}", e))
-                        }
-                    }
+                match self.player.save_file(&path, &header, &[], frames) {
+                    Ok(_) => self.multimedia.status_msg = Some("Export success!".into()),
+                    Err(e) => self.multimedia.status_msg = Some(format!("Export failed: {}", e)),
                 }
             }
+        } else {
+            self.multimedia.status_msg = Some("No compiled preview. Please compile first.".into());
         }
     }
 
-    fn export_video_streaming(&mut self) {
-        let _media_path = match &self.multimedia.media_path {
+    fn compile_video_all_frames(&mut self, ctx: &egui::Context) {
+        let media_path = match &self.multimedia.media_path {
             Some(p) => p.clone(),
             None => {
                 self.multimedia.status_msg = Some("No video selected!".into());
@@ -952,56 +980,237 @@ impl NebulaToolsApp {
             }
         };
 
-        let _out_path = match rfd::FileDialog::new()
-            .add_filter("Nebula", &["nbl"])
-            .save_file()
-        {
-            Some(p) => p,
-            None => return,
-        };
-
         self.multimedia.is_processing = true;
-        self.multimedia.status_msg = Some("Exporting Video Stream...".into());
+        self.multimedia.status_msg = Some("Compiling video frames...".into());
         self.multimedia.processing_progress = Some(0.0);
 
-        // Spawn a background thread to handle ffmpeg reading and streaming write
-        let _density = self.multimedia.density;
-        let progress_arc = Arc::new(Mutex::new(0.0));
-        let progress_clone = Arc::clone(&progress_arc);
+        let target_fps = self.multimedia.target_fps;
+        let density = self.multimedia.density.max(0.000001);
+        let brightness_threshold = self.multimedia.brightness_threshold;
+        let particle_size = self.multimedia.particle_size;
+        let point_size = self.multimedia.point_size;
+        let velocity_expr = self.multimedia.velocity_expr.clone();
+
+        // Shared state for thread communication
+        let shared_progress = Arc::new(Mutex::new(0.0f32));
+        let shared_status = Arc::new(Mutex::new(None::<String>));
+        let shared_done = Arc::new(Mutex::new(false));
+        let shared_frames = Arc::new(Mutex::new(None::<Vec<Vec<Particle>>>));
+
+        let progress_clone = shared_progress.clone();
+        let status_clone = shared_status.clone();
+        let done_clone = shared_done.clone();
+        let frames_clone = shared_frames.clone();
+
+        self.multimedia.video_compile_shared =
+            Some((shared_progress, shared_status, shared_done, shared_frames));
+
+        let ctx_clone = ctx.clone();
 
         std::thread::spawn(move || {
-            // Drop unused imports
-            // Note: This relies on ffmpeg being installed on the system path.
-            // Simplified logic: we read video dimensions first, then read frames.
+            let probe = Command::new("ffprobe")
+                .args([
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "v:0",
+                    "-show_entries",
+                    "stream=width,height,duration",
+                    "-of",
+                    "csv=p=0",
+                    &media_path,
+                ])
+                .output();
 
-            // Dummy logic to simulate video processing progress and streaming
-            for i in 0..100 {
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                if let Ok(mut p) = progress_clone.lock() {
-                    *p = (i as f32) / 100.0;
+            let (width, height, duration) = if let Ok(out) = probe {
+                let s = String::from_utf8_lossy(&out.stdout);
+                let parts: Vec<&str> = s.trim().split(',').collect();
+                if parts.len() >= 3 {
+                    (
+                        parts[0].parse::<u32>().unwrap_or(1280),
+                        parts[1].parse::<u32>().unwrap_or(720),
+                        parts[2].parse::<f32>().unwrap_or(10.0),
+                    )
+                } else {
+                    (1280, 720, 10.0)
                 }
+            } else {
+                (1280, 720, 10.0)
+            };
+
+            let child = Command::new("ffmpeg")
+                .args([
+                    "-i",
+                    &media_path,
+                    "-f",
+                    "image2pipe",
+                    "-vcodec",
+                    "rawvideo",
+                    "-pix_fmt",
+                    "rgb24",
+                    "-r",
+                    &target_fps.to_string(),
+                    "-",
+                ])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn();
+
+            let mut child = match child {
+                Ok(c) => c,
+                Err(e) => {
+                    *status_clone.lock().unwrap() = Some(format!(
+                        "Failed to start FFmpeg: {}. Is FFmpeg installed?",
+                        e
+                    ));
+                    *done_clone.lock().unwrap() = true;
+                    ctx_clone.request_repaint();
+                    return;
+                }
+            };
+
+            let mut stdout = child.stdout.take().expect("Failed to open stdout");
+            let frame_size = (width * height * 3) as usize;
+            let mut buffer = vec![0u8; frame_size];
+
+            let mut frames: Vec<Vec<Particle>> = Vec::new();
+            let mut frame_count = 0usize;
+            let total_est_frames = (duration * target_fps as f32).ceil().max(1.0) as usize;
+
+            let cx = width as f32 / 2.0;
+            let cy = height as f32 / 2.0;
+
+            let step = if density < 1.0 {
+                (1.0 / density).ceil() as usize
+            } else {
+                1usize
+            };
+            let copies_per_pixel = if density >= 1.0 {
+                density.floor() as u32
+            } else {
+                1u32
+            };
+
+            let stmts = crate::particleex::compile_expr(&velocity_expr);
+
+            use rand::Rng;
+            let mut rng = rand::thread_rng();
+
+            while stdout.read_exact(&mut buffer).is_ok() {
+                let mut frame_particles = Vec::new();
+                let mut pid: i32 = 0;
+                let t = frame_count as f64 / target_fps as f64;
+
+                for y in (0..height).step_by(step) {
+                    for x in (0..width).step_by(step) {
+                        let idx = ((y * width + x) * 3) as usize;
+                        let r = buffer[idx];
+                        let g = buffer[idx + 1];
+                        let b = buffer[idx + 2];
+                        let luma = (r as f32 * 0.299 + g as f32 * 0.587 + b as f32 * 0.114) / 255.0;
+                        if luma < brightness_threshold {
+                            continue;
+                        }
+
+                        if density < 1.0 && rng.gen::<f32>() > density {
+                            continue;
+                        }
+
+                        for c in 0..copies_per_pixel {
+                            let jx = if c == 0 {
+                                0.0
+                            } else {
+                                rng.gen_range(-0.5..0.5)
+                            };
+                            let jy = if c == 0 {
+                                0.0
+                            } else {
+                                rng.gen_range(-0.5..0.5)
+                            };
+                            let px = (x as f32 + jx - cx) * particle_size;
+                            let py = -(y as f32 + jy - cy) * particle_size;
+
+                            // Run velocity_expr per particle, cr/cg/cb override video pixel
+                            let mut pex_ctx = crate::particleex::ExprContext::new();
+                            pex_ctx.set("t", t);
+                            pex_ctx.set("x", px as f64);
+                            pex_ctx.set("y", py as f64);
+                            pex_ctx.set("z", 0.0);
+                            pex_ctx.set("cr", r as f64 / 255.0);
+                            pex_ctx.set("cg", g as f64 / 255.0);
+                            pex_ctx.set("cb", b as f64 / 255.0);
+                            pex_ctx.set("alpha", 1.0);
+                            pex_ctx.set("mpsize", point_size as f64);
+                            pex_ctx.set("vx", 0.0);
+                            pex_ctx.set("vy", 0.0);
+                            pex_ctx.set("vz", 0.0);
+                            pex_ctx.set("destory", 0.0);
+                            pex_ctx.set("id", pid as f64);
+
+                            if let Some(ref s) = stmts {
+                                crate::particleex::exec_stmts(s, &mut pex_ctx);
+                            }
+
+                            if pex_ctx.get("destory") >= 1.0 {
+                                pid += 1;
+                                continue; // skip destroyed particles
+                            }
+
+                            let final_x = px + pex_ctx.get("vx") as f32;
+                            let final_y = py + pex_ctx.get("vy") as f32;
+                            let final_z = pex_ctx.get("vz") as f32;
+                            let final_r = (pex_ctx.get("cr").clamp(0.0, 1.0) * 255.0) as u8;
+                            let final_g = (pex_ctx.get("cg").clamp(0.0, 1.0) * 255.0) as u8;
+                            let final_b = (pex_ctx.get("cb").clamp(0.0, 1.0) * 255.0) as u8;
+                            let final_a = (pex_ctx.get("alpha").clamp(0.0, 1.0) * 255.0) as u8;
+                            let final_size = pex_ctx.get("mpsize") as f32;
+
+                            frame_particles.push(Particle {
+                                id: pid,
+                                pos: [final_x, final_y, final_z],
+                                color: [final_r, final_g, final_b, final_a],
+                                size: final_size,
+                                tex_id: 0,
+                                seq_index: 0,
+                            });
+                            pid += 1;
+                        }
+                    }
+                }
+                frames.push(frame_particles);
+                frame_count += 1;
+
+                // Update progress
+                let pct = (frame_count as f32 / total_est_frames as f32).min(1.0);
+                *progress_clone.lock().unwrap() = pct;
+                ctx_clone.request_repaint();
             }
 
-            // After finishing:
-            if let Ok(mut p) = progress_clone.lock() {
-                *p = 1.0;
+            let _ = child.kill();
+
+            if !frames.is_empty() {
+                *status_clone.lock().unwrap() =
+                    Some(format!("Compilation Success! {} frames.", frames.len()));
+                *frames_clone.lock().unwrap() = Some(frames);
+            } else {
+                *status_clone.lock().unwrap() =
+                    Some("Failed: no frames decoded from video.".into());
             }
+
+            *done_clone.lock().unwrap() = true;
+            ctx_clone.request_repaint();
         });
-
-        self.multimedia.status_msg = Some("Background processing started. Check console/logs if it fails (requires ffmpeg installed).".into());
     }
 
     fn show_expression_editor(&mut self, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
             ui.label(self.i18n.tr("velocity_expr"));
-
-            // Editor theme/styling
             let editor_id = ui.make_persistent_id("velocity_script_editor");
             egui::Frame::canvas(ui.style()).show(ui, |ui| {
                 ui.add(
                     egui::TextEdit::multiline(&mut self.multimedia.velocity_expr)
                         .id(editor_id)
-                        .font(egui::TextStyle::Monospace) // Mono font for code
+                        .font(egui::TextStyle::Monospace)
                         .desired_width(f32::INFINITY)
                         .desired_rows(4)
                         .lock_focus(true)
@@ -1010,16 +1219,12 @@ impl NebulaToolsApp {
             });
 
             ui.add_space(4.0);
-
-            // Advanced Help / Hints
             ui.collapsing(self.i18n.tr("expr_help"), |ui| {
                 ui.small(self.i18n.tr("expr_funcs_desc"));
                 ui.add_space(4.0);
-
                 ui.group(|ui| {
                     ui.label(egui::RichText::new(self.i18n.tr("expr_vars")).strong());
                     ui.small(self.i18n.tr("expr_vars_desc"));
-
                     ui.add_space(4.0);
                     ui.horizontal_wrapped(|ui| {
                         let vars = [
@@ -1033,7 +1238,6 @@ impl NebulaToolsApp {
                         }
                     });
                 });
-
                 ui.add_space(4.0);
                 ui.group(|ui| {
                     ui.label(egui::RichText::new(self.i18n.tr("expr_funcs")).strong());

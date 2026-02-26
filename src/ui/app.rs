@@ -241,6 +241,13 @@ pub struct MultimediaState {
     pub source_image_preview: Option<egui::TextureHandle>,
     #[serde(skip)]
     pub last_source_size: Option<[u32; 2]>,
+    #[serde(skip)]
+    pub video_compile_shared: Option<(
+        std::sync::Arc<std::sync::Mutex<f32>>,
+        std::sync::Arc<std::sync::Mutex<Option<String>>>,
+        std::sync::Arc<std::sync::Mutex<bool>>,
+        std::sync::Arc<std::sync::Mutex<Option<Vec<Vec<crate::player::Particle>>>>>,
+    )>,
 }
 
 impl MultimediaState {
@@ -287,6 +294,7 @@ impl Default for MultimediaState {
             preview_timer: 0.0,
             source_image_preview: None,
             last_source_size: None,
+            video_compile_shared: None,
         }
     }
 }
@@ -596,7 +604,7 @@ impl eframe::App for NebulaToolsApp {
                 ui.menu_button(self.i18n.tr("file"), |ui| {
                     if self.mode == AppMode::Multimedia {
                         if ui.button(self.i18n.tr("export_nbl")).clicked() {
-                            self.export_multimedia_nbl();
+                            self.export_multimedia_nbl(ctx);
                             ui.close_menu();
                         }
                     } else if self.mode == AppMode::Particleex {
