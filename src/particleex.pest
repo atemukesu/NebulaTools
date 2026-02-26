@@ -1,0 +1,42 @@
+WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
+
+program = { SOI ~ (stmt ~ (";" ~ stmt)* ~ ";"?)? ~ EOI }
+stmt    = { expr }
+
+expr       = { or_expr }
+or_expr    = { and_expr ~ (or_op ~ and_expr)* }
+and_expr   = { cmp_expr ~ (and_op ~ cmp_expr)* }
+cmp_expr   = { add_expr ~ (cmp_op ~ add_expr)* }
+add_expr   = { mul_expr ~ (add_op ~ mul_expr)* }
+mul_expr   = { pow_expr ~ (mul_op ~ pow_expr)* }
+pow_expr   = { unary ~ ("^" ~ unary)? }
+
+unary      = { neg | not | assign_expr | primary }
+
+assign_expr = { "("? ~ lhs_list ~ ")"? ~ "=" ~ rhs_list }
+lhs_list    = { ident ~ (separator ~ ident)* }
+rhs_list    = { expr ~ ("," ~ expr)* }
+
+neg        = { "-" ~ unary }
+not        = { "!" ~ unary }
+
+primary    = { call | paren_expr | number | var }
+call       = { ident ~ "(" ~ arg_list? ~ ")" }
+arg_list   = { expr ~ ("," ~ expr)* }
+
+paren_expr = { "(" ~ expr ~ (row_cont)* ~ ")" }
+row_cont   = { separator ~ expr }
+separator  = { ",," | "," }
+
+var        = @{ ident }
+ident      = @{ (ASCII_ALPHA | "_" | "$") ~ (ASCII_ALPHANUMERIC | "_" | "$")* }
+number     = @{
+    (ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT*)? | "." ~ ASCII_DIGIT+)
+    ~ (^"e" ~ ("+" | "-")? ~ ASCII_DIGIT+)?
+}
+
+or_op  = { "||" | "|" }
+and_op = { "&&" | "&" }
+cmp_op = { "<=" | ">=" | "==" | "!=" | "<" | ">" }
+add_op = { "+" | "-" }
+mul_op = { "*" | "/" | "%" }

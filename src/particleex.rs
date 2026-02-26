@@ -1,10 +1,13 @@
 /// Particleex command compiler.
 ///
 /// Ports the JavaScript Particleex → NBL pipeline to Rust:
-///   1. Expression tokenizer + recursive-descent parser + tree-walking evaluator
+///   1. Pest PEG parser + AST builder + tree-walking evaluator
 ///   2. Particleex command parser (normal, parameter, polarparameter, tick*, rgba*)
 ///   3. Track generator  →  Vec<Vec<Particle>>  (frame snapshots)
 use crate::player::Particle;
+use pest::iterators::Pair;
+use pest::Parser as PestParser;
+use pest_derive::Parser;
 use rand::Rng;
 use std::collections::HashMap;
 use std::f64::consts::{E, PI};
@@ -13,145 +16,11 @@ use std::f64::consts::{E, PI};
 
 const TIME_SCALE: f64 = 3.0;
 
-// ─────────────────────── Expression Language ───────────────────────
+// ─────────────────────── Pest Grammar ───────────────────────
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Token {
-    Num(f64),
-    Ident(String),
-    Op(char),    // single-char operator  + - * / % ^ , ; ( )
-    DoubleComma, // ,,
-    Eq,          // ==
-    Ne,          // !=
-    Le,          // <=
-    Ge,          // >=
-    And,         // &&
-    Or,          // ||
-    Assign,      // = (single)
-    Lt,          // <
-    Gt,          // >
-}
-
-pub fn tokenize(src: &str) -> Vec<Token> {
-    let chars: Vec<char> = src.chars().collect();
-    let len = chars.len();
-    let mut i = 0;
-    let mut tokens = Vec::new();
-
-    while i < len {
-        let c = chars[i];
-        // Skip whitespace
-        if c.is_ascii_whitespace() {
-            i += 1;
-            continue;
-        }
-        // Number
-        if c.is_ascii_digit() || (c == '.' && i + 1 < len && chars[i + 1].is_ascii_digit()) {
-            let start = i;
-            while i < len && (chars[i].is_ascii_digit() || chars[i] == '.') {
-                i += 1;
-            }
-            // scientific notation
-            if i < len && (chars[i] == 'e' || chars[i] == 'E') {
-                i += 1;
-                if i < len && (chars[i] == '+' || chars[i] == '-') {
-                    i += 1;
-                }
-                while i < len && chars[i].is_ascii_digit() {
-                    i += 1;
-                }
-            }
-            let s: String = chars[start..i].iter().collect();
-            tokens.push(Token::Num(s.parse::<f64>().unwrap_or(0.0)));
-            continue;
-        }
-        // Identifier
-        if c.is_ascii_alphabetic() || c == '_' || c == '$' {
-            let start = i;
-            while i < len
-                && (chars[i].is_ascii_alphanumeric() || chars[i] == '_' || chars[i] == '$')
-            {
-                i += 1;
-            }
-            let s: String = chars[start..i].iter().collect();
-            tokens.push(Token::Ident(s));
-            continue;
-        }
-        // Two-char operators
-        if i + 1 < len {
-            let c2 = chars[i + 1];
-            match (c, c2) {
-                ('=', '=') => {
-                    tokens.push(Token::Eq);
-                    i += 2;
-                    continue;
-                }
-                ('!', '=') => {
-                    tokens.push(Token::Ne);
-                    i += 2;
-                    continue;
-                }
-                ('<', '=') => {
-                    tokens.push(Token::Le);
-                    i += 2;
-                    continue;
-                }
-                ('>', '=') => {
-                    tokens.push(Token::Ge);
-                    i += 2;
-                    continue;
-                }
-                ('&', '&') => {
-                    tokens.push(Token::And);
-                    i += 2;
-                    continue;
-                }
-                ('|', '|') => {
-                    tokens.push(Token::Or);
-                    i += 2;
-                    continue;
-                }
-                (',', ',') => {
-                    tokens.push(Token::DoubleComma);
-                    i += 2;
-                    continue;
-                }
-                _ => {}
-            }
-        }
-        // Single-char
-        match c {
-            '=' => {
-                tokens.push(Token::Assign);
-                i += 1;
-            }
-            '<' => {
-                tokens.push(Token::Lt);
-                i += 1;
-            }
-            '>' => {
-                tokens.push(Token::Gt);
-                i += 1;
-            }
-            '&' => {
-                tokens.push(Token::And);
-                i += 1;
-            }
-            '|' => {
-                tokens.push(Token::Or);
-                i += 1;
-            }
-            '+' | '-' | '*' | '/' | '%' | '^' | '(' | ')' | ',' | ';' | '!' => {
-                tokens.push(Token::Op(c));
-                i += 1;
-            }
-            _ => {
-                i += 1;
-            } // skip unknown
-        }
-    }
-    tokens
-}
+#[derive(Parser)]
+#[grammar = "particleex.pest"]
+struct ExprParser;
 
 // ─── AST ───
 
@@ -188,337 +57,149 @@ pub enum BinOp {
     Or,
 }
 
-// ─── Recursive-descent parser ───
-
-struct Parser {
-    tokens: Vec<Token>,
-    pos: usize,
-}
-
-impl Parser {
-    fn new(tokens: Vec<Token>) -> Self {
-        Self { tokens, pos: 0 }
-    }
-
-    fn peek(&self) -> Option<&Token> {
-        self.tokens.get(self.pos)
-    }
-
-    fn advance(&mut self) -> Option<Token> {
-        if self.pos < self.tokens.len() {
-            let t = self.tokens[self.pos].clone();
-            self.pos += 1;
-            Some(t)
-        } else {
-            None
-        }
-    }
-
-    fn eat_op(&mut self, ch: char) -> bool {
-        if let Some(Token::Op(c)) = self.peek() {
-            if *c == ch {
-                self.pos += 1;
-                return true;
-            }
-        }
-        false
-    }
-
-    /// Parse a full expression (lowest precedence = logical OR)
-    fn parse_expr(&mut self) -> Expr {
-        self.parse_or()
-    }
-
-    fn parse_or(&mut self) -> Expr {
-        let mut left = self.parse_and();
-        while matches!(self.peek(), Some(Token::Or)) {
-            self.advance();
-            let right = self.parse_and();
-            left = Expr::BinOp(Box::new(left), BinOp::Or, Box::new(right));
-        }
-        left
-    }
-
-    fn parse_and(&mut self) -> Expr {
-        let mut left = self.parse_comparison();
-        while matches!(self.peek(), Some(Token::And)) {
-            self.advance();
-            let right = self.parse_comparison();
-            left = Expr::BinOp(Box::new(left), BinOp::And, Box::new(right));
-        }
-        left
-    }
-
-    fn parse_comparison(&mut self) -> Expr {
-        let mut left = self.parse_additive();
-        loop {
-            let op = match self.peek() {
-                Some(Token::Eq) => BinOp::Eq,
-                Some(Token::Ne) => BinOp::Ne,
-                Some(Token::Lt) => BinOp::Lt,
-                Some(Token::Gt) => BinOp::Gt,
-                Some(Token::Le) => BinOp::Le,
-                Some(Token::Ge) => BinOp::Ge,
-                _ => break,
-            };
-            self.advance();
-            let right = self.parse_additive();
-            left = Expr::BinOp(Box::new(left), op, Box::new(right));
-        }
-        left
-    }
-
-    fn parse_additive(&mut self) -> Expr {
-        let mut left = self.parse_multiplicative();
-        loop {
-            if self.matches_op('+') {
-                self.advance();
-                let right = self.parse_multiplicative();
-                left = Expr::BinOp(Box::new(left), BinOp::Add, Box::new(right));
-            } else if self.matches_op('-') {
-                self.advance();
-                let right = self.parse_multiplicative();
-                left = Expr::BinOp(Box::new(left), BinOp::Sub, Box::new(right));
-            } else {
-                break;
-            }
-        }
-        left
-    }
-
-    fn parse_multiplicative(&mut self) -> Expr {
-        let mut left = self.parse_power();
-        loop {
-            if self.matches_op('*') {
-                self.advance();
-                let right = self.parse_power();
-                left = Expr::BinOp(Box::new(left), BinOp::Mul, Box::new(right));
-            } else if self.matches_op('/') {
-                self.advance();
-                let right = self.parse_power();
-                left = Expr::BinOp(Box::new(left), BinOp::Div, Box::new(right));
-            } else if self.matches_op('%') {
-                self.advance();
-                let right = self.parse_power();
-                left = Expr::BinOp(Box::new(left), BinOp::Mod, Box::new(right));
-            } else {
-                break;
-            }
-        }
-        left
-    }
-
-    fn parse_power(&mut self) -> Expr {
-        let base = self.parse_unary();
-        if self.matches_op('^') {
-            self.advance();
-            let exp = self.parse_unary(); // right-assoc
-            Expr::BinOp(Box::new(base), BinOp::Pow, Box::new(exp))
-        } else {
-            base
-        }
-    }
-
-    fn parse_unary(&mut self) -> Expr {
-        if self.matches_op('-') {
-            self.advance();
-            let expr = self.parse_unary();
-            return Expr::UnaryNeg(Box::new(expr));
-        }
-        if self.matches_op('!') {
-            self.advance();
-            let expr = self.parse_unary();
-            return Expr::UnaryNot(Box::new(expr));
-        }
-        self.parse_primary()
-    }
-
-    fn parse_primary(&mut self) -> Expr {
-        let saved_pos = self.pos;
-        let mut lhs_names = Vec::new();
-        let mut is_assign = false;
-
-        while let Some(Token::Ident(name)) = self.peek().cloned() {
-            lhs_names.push(name);
-            self.advance();
-            match self.peek() {
-                Some(Token::Op(',')) | Some(Token::DoubleComma) => {
-                    self.advance();
-                }
-                Some(Token::Assign) => {
-                    self.advance();
-                    is_assign = true;
-                    break;
-                }
-                _ => break,
-            }
-        }
-
-        if is_assign {
-            let mut rhs_exprs = vec![self.parse_expr()];
-            while self.matches_op(',') {
-                self.advance();
-                rhs_exprs.push(self.parse_expr());
-            }
-
-            if lhs_names.len() == 1 && rhs_exprs.len() == 1 {
-                return Expr::Assign(lhs_names[0].clone(), Box::new(rhs_exprs.pop().unwrap()));
-            } else {
-                return Expr::MultiAssign(lhs_names, rhs_exprs);
-            }
-        }
-        self.pos = saved_pos;
-
-        match self.peek().cloned() {
-            Some(Token::Num(n)) => {
-                self.advance();
-                Expr::Num(n)
-            }
-            Some(Token::Ident(name)) => {
-                self.advance();
-                // Function call?  name(...)
-                if self.matches_op('(') {
-                    self.advance(); // eat '('
-                    let mut args = Vec::new();
-                    if !self.matches_op(')') {
-                        args.push(self.parse_expr());
-                        while self.matches_op(',') {
-                            self.advance();
-                            args.push(self.parse_expr());
-                        }
-                    }
-                    self.eat_op(')');
-                    Expr::Call(name, args)
-                } else {
-                    Expr::Var(name)
-                }
-            }
-            Some(Token::Op('(')) => {
-                self.advance();
-                let mut rows = Vec::new();
-                let mut current_row = Vec::new();
-
-                current_row.push(self.parse_expr());
-
-                let mut is_matrix = false;
-                loop {
-                    if self.matches_op(',') {
-                        self.advance();
-                        current_row.push(self.parse_expr());
-                        is_matrix = true;
-                    } else if matches!(self.peek(), Some(Token::DoubleComma)) {
-                        self.advance();
-                        rows.push(std::mem::take(&mut current_row));
-                        current_row.push(self.parse_expr());
-                        is_matrix = true;
-                    } else {
-                        break;
-                    }
-                }
-                self.eat_op(')');
-
-                if is_matrix {
-                    rows.push(current_row);
-                    Expr::MatrixBuilder(rows)
-                } else {
-                    current_row.pop().unwrap_or(Expr::Num(0.0))
-                }
-            }
-            _ => {
-                // Fallback: return 0
-                Expr::Num(0.0)
-            }
-        }
-    }
-
-    fn matches_op(&self, ch: char) -> bool {
-        matches!(self.peek(), Some(Token::Op(c)) if *c == ch)
-    }
-}
-
-// ─── Statement-level parser ───
+// ─── Statement-level types ───
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
-    Assign(String, Expr),
-    MultiAssign(Vec<String>, Vec<Expr>),
     ExprStmt(Expr),
 }
 
-pub fn parse_statements(tokens: Vec<Token>) -> Vec<Stmt> {
-    // Split by semicolons first
-    let mut groups: Vec<Vec<Token>> = Vec::new();
-    let mut current: Vec<Token> = Vec::new();
-    for t in tokens {
-        if matches!(t, Token::Op(';')) {
-            if !current.is_empty() {
-                groups.push(std::mem::take(&mut current));
-            }
-        } else {
-            current.push(t);
+// ─── Pest pair → AST conversion ───
+
+fn build_expr(pair: Pair<Rule>) -> Expr {
+    match pair.as_rule() {
+        Rule::expr | Rule::stmt => build_expr(pair.into_inner().next().unwrap()),
+        Rule::number => {
+            let n: f64 = pair.as_str().parse().unwrap_or(0.0);
+            Expr::Num(n)
         }
-    }
-    if !current.is_empty() {
-        groups.push(current);
-    }
-
-    let mut stmts = Vec::new();
-    for group in groups {
-        // Find top-level '=' (not inside parens)
-        let mut assign_idx = None;
-        let mut depth = 0;
-        for (i, t) in group.iter().enumerate() {
-            match t {
-                Token::Op('(') => depth += 1,
-                Token::Op(')') => depth -= 1,
-                Token::Assign if depth == 0 => {
-                    assign_idx = Some(i);
-                    break;
-                }
-                _ => {}
-            }
+        Rule::var => Expr::Var(pair.as_str().to_string()),
+        Rule::call => {
+            let mut inner = pair.into_inner();
+            let name = inner.next().unwrap().as_str().to_string();
+            let args: Vec<Expr> = inner
+                .filter(|p| p.as_rule() == Rule::arg_list)
+                .flat_map(|p| p.into_inner())
+                .map(build_expr)
+                .collect();
+            Expr::Call(name, args)
         }
-
-        if let Some(ai) = assign_idx {
-            let lhs_tokens: Vec<Token> = group[..ai].to_vec();
-            let rhs_tokens: Vec<Token> = group[ai + 1..].to_vec();
-
-            // Check if LHS is multi-assignment  (a, b = ...)
-            let mut lhs_names = Vec::new();
-            let mut has_comma = false;
-            for t in &lhs_tokens {
-                match t {
-                    Token::Ident(name) => lhs_names.push(name.clone()),
-                    // 添加 Double Comma
-                    Token::Op(',') | Token::DoubleComma => has_comma = true,
-                    _ => {}
+        Rule::paren_expr => {
+            let mut inner = pair.into_inner();
+            let first = build_expr(inner.next().unwrap());
+            let continuations: Vec<Pair<Rule>> =
+                inner.filter(|p| p.as_rule() == Rule::row_cont).collect();
+            if continuations.is_empty() {
+                return first;
+            }
+            // Build matrix rows: ,, starts new row, , continues current row
+            let mut rows: Vec<Vec<Expr>> = Vec::new();
+            let mut current_row = vec![first];
+            for cont in continuations {
+                let mut ci = cont.into_inner();
+                let sep = ci.next().unwrap();
+                let val = build_expr(ci.next().unwrap());
+                if sep.as_str() == ",," {
+                    rows.push(std::mem::take(&mut current_row));
+                    current_row.push(val);
+                } else {
+                    current_row.push(val);
                 }
             }
-
-            let mut rhs_parser = Parser::new(rhs_tokens);
-
-            if has_comma && lhs_names.len() > 1 {
-                // Multi-assign: a, b, c = expr1, expr2, expr3
-                let mut rhs_exprs = vec![rhs_parser.parse_expr()];
-                while rhs_parser.matches_op(',') {
-                    rhs_parser.advance();
-                    rhs_exprs.push(rhs_parser.parse_expr());
-                }
-                stmts.push(Stmt::MultiAssign(lhs_names, rhs_exprs));
-            } else if lhs_names.len() == 1 {
-                let rhs = rhs_parser.parse_expr();
-                stmts.push(Stmt::Assign(lhs_names[0].clone(), rhs));
+            rows.push(current_row);
+            Expr::MatrixBuilder(rows)
+        }
+        Rule::assign_expr => {
+            let mut inner = pair.into_inner();
+            let lhs_pair = inner.next().unwrap(); // lhs_list
+            let rhs_pair = inner.next().unwrap(); // rhs_list
+            let names: Vec<String> = lhs_pair
+                .into_inner()
+                .filter(|p| p.as_rule() == Rule::ident)
+                .map(|p| p.as_str().to_string())
+                .collect();
+            let exprs: Vec<Expr> = rhs_pair.into_inner().map(build_expr).collect();
+            if names.len() == 1 && exprs.len() == 1 {
+                Expr::Assign(
+                    names[0].clone(),
+                    Box::new(exprs.into_iter().next().unwrap()),
+                )
             } else {
-                // Fallback: expression
-                let mut p = Parser::new(group);
-                stmts.push(Stmt::ExprStmt(p.parse_expr()));
+                Expr::MultiAssign(names, exprs)
             }
-        } else {
-            let mut p = Parser::new(group);
-            stmts.push(Stmt::ExprStmt(p.parse_expr()));
+        }
+        Rule::neg => {
+            let inner = pair.into_inner().next().unwrap();
+            Expr::UnaryNeg(Box::new(build_expr(inner)))
+        }
+        Rule::not => {
+            let inner = pair.into_inner().next().unwrap();
+            Expr::UnaryNot(Box::new(build_expr(inner)))
+        }
+        Rule::or_expr | Rule::and_expr | Rule::cmp_expr | Rule::add_expr | Rule::mul_expr => {
+            let mut inner = pair.into_inner();
+            let mut left = build_expr(inner.next().unwrap());
+            while let Some(op_pair) = inner.next() {
+                let op = match op_pair.as_str() {
+                    "||" | "|" => BinOp::Or,
+                    "&&" | "&" => BinOp::And,
+                    "==" => BinOp::Eq,
+                    "!=" => BinOp::Ne,
+                    "<=" => BinOp::Le,
+                    ">=" => BinOp::Ge,
+                    "<" => BinOp::Lt,
+                    ">" => BinOp::Gt,
+                    "+" => BinOp::Add,
+                    "-" => BinOp::Sub,
+                    "*" => BinOp::Mul,
+                    "/" => BinOp::Div,
+                    "%" => BinOp::Mod,
+                    _ => BinOp::Add,
+                };
+                let right = build_expr(inner.next().unwrap());
+                left = Expr::BinOp(Box::new(left), op, Box::new(right));
+            }
+            left
+        }
+        Rule::pow_expr => {
+            let mut inner = pair.into_inner();
+            let base = build_expr(inner.next().unwrap());
+            if let Some(exp) = inner.next() {
+                Expr::BinOp(Box::new(base), BinOp::Pow, Box::new(build_expr(exp)))
+            } else {
+                base
+            }
+        }
+        Rule::unary | Rule::primary => build_expr(pair.into_inner().next().unwrap()),
+        _ => Expr::Num(0.0),
+    }
+}
+
+fn build_stmt(pair: Pair<Rule>) -> Stmt {
+    match pair.as_rule() {
+        Rule::stmt => Stmt::ExprStmt(build_expr(pair.into_inner().next().unwrap())),
+        _ => Stmt::ExprStmt(Expr::Num(0.0)),
+    }
+}
+
+pub fn parse_statements_pest(src: &str) -> Vec<Stmt> {
+    let parsed = ExprParser::parse(Rule::program, src);
+    match parsed {
+        Ok(mut pairs) => {
+            let program = pairs.next().unwrap();
+            let mut stmts = Vec::new();
+            for pair in program.into_inner() {
+                if pair.as_rule() == Rule::stmt {
+                    stmts.push(build_stmt(pair));
+                }
+            }
+            stmts
+        }
+        Err(e) => {
+            println!("Parse Error: {:?}", e);
+            Vec::new()
         }
     }
-    stmts
 }
 
 #[derive(Debug, Clone)]
@@ -973,46 +654,6 @@ pub fn exec_stmts(stmts: &[Stmt], ctx: &mut ExprContext) -> Value {
     let mut last_val = Value::Num(0.0);
     for stmt in stmts {
         last_val = match stmt {
-            Stmt::Assign(name, expr) => {
-                let val = eval_expr(expr, ctx);
-                ctx.set(name, val.clone());
-                val
-            }
-            Stmt::MultiAssign(names, exprs) => {
-                let vals: Vec<Value> = exprs.iter().map(|e| eval_expr(e, ctx)).collect();
-
-                // 矩阵解构：如果右侧只有一个表达式，且结果是矩阵，将其展平赋值
-                if vals.len() == 1 {
-                    if let Value::Matrix(m) = &vals[0] {
-                        let mut flat = Vec::new();
-                        for row in m {
-                            for val in row {
-                                flat.push(*val);
-                            }
-                        }
-                        for (i, name) in names.iter().enumerate() {
-                            let v = flat.get(i).copied().unwrap_or(0.0);
-                            ctx.set(name, Value::Num(v));
-                        }
-                        vals[0].clone()
-                    } else {
-                        // 单个非矩阵值：赋值给所有变量
-                        for name in names.iter() {
-                            ctx.set(name, vals[0].clone());
-                        }
-                        vals[0].clone()
-                    }
-                } else {
-                    // 原有的普通多变量赋值 (如 a, b = 1, 2)
-                    let mut last_v = Value::Num(0.0);
-                    for (i, name) in names.iter().enumerate() {
-                        let v = vals.get(i).cloned().unwrap_or(Value::Num(0.0));
-                        ctx.set(name, v.clone());
-                        last_v = v;
-                    }
-                    last_v
-                }
-            }
             Stmt::ExprStmt(expr) => eval_expr(expr, ctx),
         };
     }
@@ -1025,11 +666,11 @@ pub fn compile_expr(src: &str) -> Option<Vec<Stmt>> {
     if src.is_empty() || src == "null" {
         return None;
     }
-    let tokens = tokenize(src);
-    if tokens.is_empty() {
+    let stmts = parse_statements_pest(src);
+    if stmts.is_empty() {
         return None;
     }
-    Some(parse_statements(tokens))
+    Some(stmts)
 }
 
 // ─────────────────────── Command Types ───────────────────────
@@ -1941,5 +1582,32 @@ pub fn validate_command(line: &str) -> Result<String, String> {
             Ok(info)
         }
         None => Err("❌ Failed to parse command arguments".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_complex_expr() {
+        let code = "a=random()*2*PI;b=acos(1-2*random());x=3*sin(b)*cos(a);y=3*cos(b);z=3*sin(b)*sin(a);c=random();(c<0.5&cr,cg,cb=0.0,1.0,1.0)|(c>=0.5&c<0.75&cr,cg,cb=1.0,1.0,0.0)|(c>=0.75&cr,cg,cb=1.0,0.0,1.0);alpha=1.0";
+        let stmts = parse_statements_pest(code);
+        assert!(!stmts.is_empty());
+        let mut ctx = ExprContext::new();
+        ctx.set("cr", Value::Num(0.0));
+        ctx.set("cg", Value::Num(0.0));
+        ctx.set("cb", Value::Num(0.0));
+        exec_stmts(&stmts, &mut ctx);
+        println!(
+            "{:?} {:?} {:?}",
+            ctx.get("cr"),
+            ctx.get("cg"),
+            ctx.get("cb")
+        );
+
+        let code2 = "yaw=PI/40;(vx,,vz)=(-sin(yaw),cos(yaw),,-cos(yaw),-sin(yaw))*(x*2*sin(yaw),,z*2*sin(yaw));(t<60&vy=0.1*cos(PI*t/60)*0.5+0.1); (t>=60&vy=0.0);cr=cr;cg=cg;cb=cb;alpha=1.0";
+        let stmts2 = parse_statements_pest(code2);
+        assert!(!stmts2.is_empty());
     }
 }
