@@ -1,4 +1,3 @@
-use crate::editor::EmitterConfig;
 use crate::i18n::I18nManager;
 use crate::player::{NblHeader, Particle, PlayerState};
 use crate::renderer::ParticleRenderer;
@@ -14,9 +13,7 @@ use std::sync::{Arc, Mutex};
 pub enum AppMode {
     Edit,
     Preview,
-    Create,
     Particleex,
-    Scene,
     Multimedia,
 }
 
@@ -106,121 +103,6 @@ impl Default for EditState {
             compress_keyframe_interval: 60,
             compress_zstd_level: 1,
             compress_progress: None,
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct AnimKeyframe {
-    pub position: [f32; 3],
-    pub rotation: [f32; 3],
-    pub scale: [f32; 3],
-    pub alpha: f32,
-}
-
-impl Default for AnimKeyframe {
-    fn default() -> Self {
-        Self {
-            position: [0.0; 3],
-            rotation: [0.0; 3],
-            scale: [1.0, 1.0, 1.0],
-            alpha: 1.0,
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct ImageTextConfig {
-    pub is_text: bool,
-    pub text_input: String,
-    pub font_name: String,
-    pub system_fonts: Vec<String>,
-    pub font_size: f32,
-    pub media_path: Option<String>,
-    pub density: f32,
-    pub particle_size: f32,
-    pub point_size: f32,
-    pub brightness_threshold: f32,
-}
-
-impl Default for ImageTextConfig {
-    fn default() -> Self {
-        Self {
-            is_text: false,
-            text_input: "Hello".to_string(),
-            font_name: String::new(),
-            system_fonts: Vec::new(),
-            font_size: 64.0,
-            media_path: None,
-            density: 0.5,
-            particle_size: 0.1,
-            point_size: 0.05,
-            brightness_threshold: 0.1,
-        }
-    }
-}
-
-#[derive(Clone)]
-pub enum CreatorObjectData {
-    Emitter(EmitterConfig),
-    Shape(ShapeConfig),
-    Parameter(ParameterConfig),
-    ImageText(ImageTextConfig),
-}
-
-#[derive(Clone)]
-pub struct CreatorObject {
-    pub name: String,
-    pub enabled: bool,
-    pub position: [f32; 3],
-    pub rotation: [f32; 3],
-    pub scale: [f32; 3],
-    pub alpha: f32,
-    pub velocity_expr: String,
-    pub data: CreatorObjectData,
-    pub keyframes: std::collections::BTreeMap<u32, AnimKeyframe>,
-}
-
-impl Default for CreatorObject {
-    fn default() -> Self {
-        Self {
-            name: "Object".to_string(),
-            enabled: true,
-            position: [0.0; 3],
-            rotation: [0.0; 3],
-            scale: [1.0, 1.0, 1.0],
-            alpha: 1.0,
-            velocity_expr: "vx=0; vy=0; vz=0".to_string(),
-            data: CreatorObjectData::Emitter(EmitterConfig::default()),
-            keyframes: std::collections::BTreeMap::new(),
-        }
-    }
-}
-
-pub struct CreatorState {
-    pub objects: Vec<CreatorObject>,
-    pub selected_object: Option<usize>,
-    pub target_fps: u16,
-    pub duration_secs: f32,
-    pub preview_frames: Option<Vec<Vec<Particle>>>,
-    pub preview_playing: bool,
-    pub preview_frame_idx: i32,
-    pub preview_timer: f32,
-    pub status_msg: Option<String>,
-}
-
-impl Default for CreatorState {
-    fn default() -> Self {
-        Self {
-            objects: Vec::new(),
-            selected_object: None,
-            target_fps: 30,
-            duration_secs: 5.0,
-            preview_frames: None,
-            preview_playing: false,
-            preview_frame_idx: 0,
-            preview_timer: 0.0,
-            status_msg: None,
         }
     }
 }
@@ -458,128 +340,6 @@ impl Default for ParticleexState {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-pub struct ParameterConfig {
-    pub is_polar: bool,
-    pub center: [f32; 3],
-    pub color: [u8; 4],
-    pub velocity: [f32; 3],
-    pub t_begin: f32,
-    pub t_end: f32,
-    pub t_step: f32,
-    pub expr: String,
-    pub velocity_expr: String,
-    pub lifespan: u32,
-}
-
-impl Default for ParameterConfig {
-    fn default() -> Self {
-        Self {
-            is_polar: false,
-            center: [0.0; 3],
-            color: [255; 4],
-            velocity: [0.0; 3],
-            t_begin: -10.0,
-            t_end: 10.0,
-            t_step: 0.1,
-            expr: "x=cos(t); y=sin(t); z=0".to_string(),
-            velocity_expr: "vx=0; vy=0; vz=0".to_string(),
-            lifespan: 200,
-        }
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
-pub enum SceneShapeType {
-    Line,
-    Plane,
-    Sphere,
-    Cube,
-    Cylinder,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-pub struct ShapeConfig {
-    pub shape_type: SceneShapeType,
-    pub origin: [f32; 3],
-    pub end_pos: [f32; 3], // for line
-    pub size: [f32; 3],    // for plane/cube/cylinder
-    pub radius: f32,       // for sphere/cylinder
-    pub count: u32,
-    pub velocity_expr: String,
-    pub color: [u8; 4],
-    pub lifespan: u32,
-}
-
-impl Default for ShapeConfig {
-    fn default() -> Self {
-        Self {
-            shape_type: SceneShapeType::Line,
-            origin: [0.0; 3],
-            end_pos: [1.0, 0.0, 0.0],
-            size: [1.0, 1.0, 1.0],
-            radius: 1.0,
-            count: 20,
-            velocity_expr: "vx=0; vy=0.1; vz=0".to_string(),
-            color: [255; 4],
-            lifespan: 200,
-        }
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-pub enum SceneItemData {
-    Emitter(crate::editor::EmitterConfig),
-    Parameter(ParameterConfig),
-    Shape(ShapeConfig),
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-pub struct SceneItem {
-    pub name: String,
-    pub data: SceneItemData,
-    pub start_tick: f32,
-    pub position: [f32; 3],
-    pub enabled: bool,
-}
-
-impl Default for SceneItem {
-    fn default() -> Self {
-        Self {
-            name: "New Item".to_string(),
-            data: SceneItemData::Emitter(crate::editor::EmitterConfig::default()),
-            start_tick: 0.0,
-            position: [0.0; 3],
-            enabled: true,
-        }
-    }
-}
-pub struct SceneState {
-    pub items: Vec<SceneItem>,
-    pub preview_frames: Option<Vec<Vec<Particle>>>,
-    pub preview_playing: bool,
-    pub preview_frame_idx: i32,
-    pub preview_timer: f32,
-    pub preview_fps: u16,
-    pub status_msg: Option<String>,
-    pub selected_item: Option<usize>,
-}
-
-impl Default for SceneState {
-    fn default() -> Self {
-        Self {
-            items: Vec::new(),
-            preview_frames: None,
-            preview_playing: false,
-            preview_frame_idx: 0,
-            preview_timer: 0.0,
-            preview_fps: 30,
-            status_msg: None,
-            selected_item: None,
-        }
-    }
-}
-
 pub struct NebulaToolsApp {
     pub player: PlayerState,
     pub config: AppConfig,
@@ -594,9 +354,7 @@ pub struct NebulaToolsApp {
     pub fps_display: f32,
     pub fps_timer: f32,
     pub edit: EditState,
-    pub creator: CreatorState,
     pub pex: ParticleexState,
-    pub scene: SceneState,
     pub multimedia: MultimediaState,
 }
 
@@ -625,9 +383,7 @@ impl NebulaToolsApp {
             fps_display: 0.0,
             fps_timer: 0.0,
             edit: EditState::default(),
-            creator: CreatorState::default(),
             pex: ParticleexState::default(),
-            scene: SceneState::default(),
             multimedia: MultimediaState::default(),
         }
     }
@@ -802,9 +558,7 @@ impl NebulaToolsApp {
 impl eframe::App for NebulaToolsApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if self.player.header.is_none()
-            && self.mode != AppMode::Create
             && self.mode != AppMode::Particleex
-            && self.mode != AppMode::Scene
             && self.mode != AppMode::Multimedia
         {
             self.show_welcome_screen(ctx);
@@ -836,17 +590,11 @@ impl eframe::App for NebulaToolsApp {
                     self.mode = AppMode::Preview;
                     self.player.header = None;
                     self.pex.preview_frames = None;
-                    self.scene.preview_frames = None;
                 }
                 ui.separator();
 
                 ui.menu_button(self.i18n.tr("file"), |ui| {
-                    if self.mode == AppMode::Create {
-                        if ui.button(self.i18n.tr("export_nbl")).clicked() {
-                            self.export_creator_nbl();
-                            ui.close_menu();
-                        }
-                    } else if self.mode == AppMode::Multimedia {
+                    if self.mode == AppMode::Multimedia {
                         if ui.button(self.i18n.tr("export_nbl")).clicked() {
                             self.export_multimedia_nbl();
                             ui.close_menu();
@@ -854,11 +602,6 @@ impl eframe::App for NebulaToolsApp {
                     } else if self.mode == AppMode::Particleex {
                         if ui.button(self.i18n.tr("export_nbl")).clicked() {
                             self.export_particleex_nbl();
-                            ui.close_menu();
-                        }
-                    } else if self.mode == AppMode::Scene {
-                        if ui.button(self.i18n.tr("export_nbl")).clicked() {
-                            self.export_scene_nbl();
                             ui.close_menu();
                         }
                     } else {
@@ -888,10 +631,7 @@ impl eframe::App for NebulaToolsApp {
 
                 // 1. Back to Home button (if in a tool mode and no file is being edited)
                 if self.player.header.is_none()
-                    && (self.mode == AppMode::Create
-                        || self.mode == AppMode::Particleex
-                        || self.mode == AppMode::Scene
-                        || self.mode == AppMode::Multimedia)
+                    && (self.mode == AppMode::Particleex || self.mode == AppMode::Multimedia)
                 {
                     if ui.button(format!("🏠 {}", self.i18n.tr("home"))).clicked() {
                         self.mode = AppMode::Edit; // This will trigger welcome screen
@@ -911,16 +651,8 @@ impl eframe::App for NebulaToolsApp {
                 }
 
                 // 3. Current active Tool Mode display (Non-switchable while inside)
-                if self.mode == AppMode::Create {
-                    ui.label(
-                        egui::RichText::new(format!("✨ {}", self.i18n.tr("creator"))).strong(),
-                    );
-                } else if self.mode == AppMode::Particleex {
+                if self.mode == AppMode::Particleex {
                     ui.label(egui::RichText::new("🔧 Particleex").strong());
-                } else if self.mode == AppMode::Scene {
-                    ui.label(
-                        egui::RichText::new(format!("🎬 {}", self.i18n.tr("scene_mode"))).strong(),
-                    );
                 } else if self.mode == AppMode::Multimedia {
                     ui.label(
                         egui::RichText::new(format!("📺 {}", self.i18n.tr("multimedia_mode")))
@@ -933,9 +665,7 @@ impl eframe::App for NebulaToolsApp {
         match self.mode {
             AppMode::Preview => self.show_preview_workflow(ctx),
             AppMode::Edit => self.show_edit_workflow(ctx),
-            AppMode::Create => self.show_creator_workflow(ctx),
             AppMode::Particleex => self.show_particleex_workflow(ctx),
-            AppMode::Scene => self.show_scene_workflow(ctx),
             AppMode::Multimedia => self.show_multimedia_workflow(ctx),
         }
     }

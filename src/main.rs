@@ -1,4 +1,3 @@
-mod editor;
 mod i18n;
 mod math;
 mod particleex;
