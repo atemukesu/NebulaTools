@@ -166,6 +166,8 @@ pub enum Expr {
     #[allow(dead_code)]
     Conditional(Box<Expr>, Box<Expr>, Box<Expr>),
     MatrixBuilder(Vec<Vec<Expr>>),
+    Assign(String, Box<Expr>),
+    MultiAssign(Vec<String>, Vec<Expr>),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -332,6 +334,41 @@ impl Parser {
     }
 
     fn parse_primary(&mut self) -> Expr {
+        let saved_pos = self.pos;
+        let mut lhs_names = Vec::new();
+        let mut is_assign = false;
+
+        while let Some(Token::Ident(name)) = self.peek().cloned() {
+            lhs_names.push(name);
+            self.advance();
+            match self.peek() {
+                Some(Token::Op(',')) | Some(Token::DoubleComma) => {
+                    self.advance();
+                }
+                Some(Token::Assign) => {
+                    self.advance();
+                    is_assign = true;
+                    break;
+                }
+                _ => break,
+            }
+        }
+
+        if is_assign {
+            let mut rhs_exprs = vec![self.parse_expr()];
+            while self.matches_op(',') {
+                self.advance();
+                rhs_exprs.push(self.parse_expr());
+            }
+
+            if lhs_names.len() == 1 && rhs_exprs.len() == 1 {
+                return Expr::Assign(lhs_names[0].clone(), Box::new(rhs_exprs.pop().unwrap()));
+            } else {
+                return Expr::MultiAssign(lhs_names, rhs_exprs);
+            }
+        }
+        self.pos = saved_pos;
+
         match self.peek().cloned() {
             Some(Token::Num(n)) => {
                 self.advance();
@@ -452,7 +489,8 @@ pub fn parse_statements(tokens: Vec<Token>) -> Vec<Stmt> {
             for t in &lhs_tokens {
                 match t {
                     Token::Ident(name) => lhs_names.push(name.clone()),
-                    Token::Op(',') => has_comma = true,
+                    // 添加 Double Comma
+                    Token::Op(',') | Token::DoubleComma => has_comma = true,
                     _ => {}
                 }
             }
@@ -538,6 +576,28 @@ pub fn eval_expr(expr: &Expr, ctx: &mut ExprContext) -> Value {
         Expr::Num(n) => Value::Num(*n),
         Expr::Var(name) => ctx.get(name),
         Expr::BinOp(l, op, r) => {
+            // 修复 3：将 And 和 Or 提出来做短路判断！
+            match op {
+                BinOp::And => {
+                    let lv = eval_expr(l, ctx);
+                    if !lv.is_true() {
+                        return Value::Num(0.0);
+                    }
+                    let rv = eval_expr(r, ctx);
+                    return Value::Num(if rv.is_true() { 1.0 } else { 0.0 });
+                }
+                BinOp::Or => {
+                    let lv = eval_expr(l, ctx);
+                    if lv.is_true() {
+                        return Value::Num(1.0);
+                    }
+                    let rv = eval_expr(r, ctx);
+                    return Value::Num(if rv.is_true() { 1.0 } else { 0.0 });
+                }
+                _ => {}
+            }
+
+            // 其他运算符正常求值两边
             let lv = eval_expr(l, ctx);
             let rv = eval_expr(r, ctx);
             match op {
@@ -874,6 +934,37 @@ pub fn eval_expr(expr: &Expr, ctx: &mut ExprContext) -> Value {
                 res_rows.push(res_row);
             }
             Value::Matrix(res_rows)
+        }
+        Expr::Assign(name, val_expr) => {
+            let val = eval_expr(val_expr, ctx);
+            ctx.set(name, val.clone());
+            val
+        }
+        Expr::MultiAssign(names, exprs) => {
+            let vals: Vec<Value> = exprs.iter().map(|e| eval_expr(e, ctx)).collect();
+            if vals.len() == 1 {
+                if let Value::Matrix(m) = &vals[0] {
+                    let mut flat = Vec::new();
+                    for row in m {
+                        for val in row {
+                            flat.push(*val);
+                        }
+                    }
+                    for (i, name) in names.iter().enumerate() {
+                        let v = flat.get(i).copied().unwrap_or(0.0);
+                        ctx.set(name, Value::Num(v));
+                    }
+                    return vals[0].clone();
+                }
+            }
+
+            let mut last_v = Value::Num(0.0);
+            for (i, name) in names.iter().enumerate() {
+                let v = vals.get(i).cloned().unwrap_or(Value::Num(0.0));
+                ctx.set(name, v.clone());
+                last_v = v;
+            }
+            last_v
         }
     }
 }
