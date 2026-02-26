@@ -994,18 +994,24 @@ pub fn exec_stmts(stmts: &[Stmt], ctx: &mut ExprContext) -> Value {
                             let v = flat.get(i).copied().unwrap_or(0.0);
                             ctx.set(name, Value::Num(v));
                         }
-                        return vals[0].clone();
+                        vals[0].clone()
+                    } else {
+                        // 单个非矩阵值：赋值给所有变量
+                        for name in names.iter() {
+                            ctx.set(name, vals[0].clone());
+                        }
+                        vals[0].clone()
                     }
+                } else {
+                    // 原有的普通多变量赋值 (如 a, b = 1, 2)
+                    let mut last_v = Value::Num(0.0);
+                    for (i, name) in names.iter().enumerate() {
+                        let v = vals.get(i).cloned().unwrap_or(Value::Num(0.0));
+                        ctx.set(name, v.clone());
+                        last_v = v;
+                    }
+                    last_v
                 }
-
-                // 原有的普通多变量赋值 (如 a, b = 1, 2)
-                let mut last_v = Value::Num(0.0);
-                for (i, name) in names.iter().enumerate() {
-                    let v = vals.get(i).cloned().unwrap_or(Value::Num(0.0));
-                    ctx.set(name, v.clone());
-                    last_v = v;
-                }
-                last_v
             }
             Stmt::ExprStmt(expr) => eval_expr(expr, ctx),
         };
@@ -1145,20 +1151,13 @@ struct ParsedCommand {
 }
 
 fn parse_coord(val: &str) -> f64 {
-    let is_relative = val.starts_with('~');
     let s = val.replace('~', "");
     let num = if s.is_empty() {
         0.0
     } else {
         s.parse::<f64>().unwrap_or(0.0)
     };
-
-    // 如果是相对坐标，或者是不包含小数点的整数，自动 +0.5 居中
-    if is_relative || !val.contains('.') {
-        num + 0.5
-    } else {
-        num
-    }
+    num
 }
 
 fn parse_num(val: &str, default: f64) -> f64 {
