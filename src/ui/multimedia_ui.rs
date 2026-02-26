@@ -482,6 +482,7 @@ impl NebulaToolsApp {
                 );
             }
         });
+        // TODO: To be deleted.
         ui.label(
             egui::RichText::new(self.i18n.tr("video_note"))
                 .small()
@@ -771,41 +772,53 @@ impl NebulaToolsApp {
 
                 for p in runtime_particles.iter_mut() {
                     let mut pex_ctx = crate::particleex::ExprContext::new();
-                    pex_ctx.set("t", t);
-                    pex_ctx.set("x", p.pos[0] as f64);
-                    pex_ctx.set("y", p.pos[1] as f64);
-                    pex_ctx.set("z", p.pos[2] as f64);
-                    pex_ctx.set("cr", p.color[0] as f64 / 255.0);
-                    pex_ctx.set("cg", p.color[1] as f64 / 255.0);
-                    pex_ctx.set("cb", p.color[2] as f64 / 255.0);
-                    pex_ctx.set("alpha", p.color[3] as f64 / 255.0);
-                    pex_ctx.set("mpsize", p.size as f64);
-                    pex_ctx.set("vx", 0.0);
-                    pex_ctx.set("vy", 0.0);
-                    pex_ctx.set("vz", 0.0);
-                    pex_ctx.set("destory", 0.0);
+                    pex_ctx.set("t", crate::particleex::Value::Num(t));
+                    pex_ctx.set("x", crate::particleex::Value::Num(p.pos[0] as f64));
+                    pex_ctx.set("y", crate::particleex::Value::Num(p.pos[1] as f64));
+                    pex_ctx.set("z", crate::particleex::Value::Num(p.pos[2] as f64));
+                    pex_ctx.set(
+                        "cr",
+                        crate::particleex::Value::Num(p.color[0] as f64 / 255.0),
+                    );
+                    pex_ctx.set(
+                        "cg",
+                        crate::particleex::Value::Num(p.color[1] as f64 / 255.0),
+                    );
+                    pex_ctx.set(
+                        "cb",
+                        crate::particleex::Value::Num(p.color[2] as f64 / 255.0),
+                    );
+                    pex_ctx.set(
+                        "alpha",
+                        crate::particleex::Value::Num(p.color[3] as f64 / 255.0),
+                    );
+                    pex_ctx.set("mpsize", crate::particleex::Value::Num(p.size as f64));
+                    pex_ctx.set("vx", crate::particleex::Value::Num(0.0));
+                    pex_ctx.set("vy", crate::particleex::Value::Num(0.0));
+                    pex_ctx.set("vz", crate::particleex::Value::Num(0.0));
+                    pex_ctx.set("destroy", crate::particleex::Value::Num(0.0));
 
                     if let Some(ref s) = stmts {
                         crate::particleex::exec_stmts(s, &mut pex_ctx);
                     }
 
-                    if pex_ctx.get("destory") >= 1.0 {
+                    if pex_ctx.get("destroy").as_num() >= 1.0 {
                         p.color[3] = 0;
                     }
 
-                    let vx = pex_ctx.get("vx") as f32;
-                    let vy = pex_ctx.get("vy") as f32;
-                    let vz = pex_ctx.get("vz") as f32;
+                    let vx = pex_ctx.get("vx").as_num() as f32;
+                    let vy = pex_ctx.get("vy").as_num() as f32;
+                    let vz = pex_ctx.get("vz").as_num() as f32;
 
                     p.pos[0] += vx;
                     p.pos[1] += vy;
                     p.pos[2] += vz;
 
-                    p.color[0] = (pex_ctx.get("cr").clamp(0.0, 1.0) * 255.0) as u8;
-                    p.color[1] = (pex_ctx.get("cg").clamp(0.0, 1.0) * 255.0) as u8;
-                    p.color[2] = (pex_ctx.get("cb").clamp(0.0, 1.0) * 255.0) as u8;
-                    p.color[3] = (pex_ctx.get("alpha").clamp(0.0, 1.0) * 255.0) as u8;
-                    p.size = pex_ctx.get("mpsize") as f32;
+                    p.color[0] = (pex_ctx.get("cr").as_num().clamp(0.0, 1.0) * 255.0) as u8;
+                    p.color[1] = (pex_ctx.get("cg").as_num().clamp(0.0, 1.0) * 255.0) as u8;
+                    p.color[2] = (pex_ctx.get("cb").as_num().clamp(0.0, 1.0) * 255.0) as u8;
+                    p.color[3] = (pex_ctx.get("alpha").as_num().clamp(0.0, 1.0) * 255.0) as u8;
+                    p.size = pex_ctx.get("mpsize").as_num() as f32;
                 }
 
                 let mut frame_particles = runtime_particles.clone();
@@ -1132,38 +1145,42 @@ impl NebulaToolsApp {
 
                             // Run velocity_expr per particle, cr/cg/cb override video pixel
                             let mut pex_ctx = crate::particleex::ExprContext::new();
-                            pex_ctx.set("t", t);
-                            pex_ctx.set("x", px as f64);
-                            pex_ctx.set("y", py as f64);
-                            pex_ctx.set("z", 0.0);
-                            pex_ctx.set("cr", r as f64 / 255.0);
-                            pex_ctx.set("cg", g as f64 / 255.0);
-                            pex_ctx.set("cb", b as f64 / 255.0);
-                            pex_ctx.set("alpha", 1.0);
-                            pex_ctx.set("mpsize", point_size as f64);
-                            pex_ctx.set("vx", 0.0);
-                            pex_ctx.set("vy", 0.0);
-                            pex_ctx.set("vz", 0.0);
-                            pex_ctx.set("destory", 0.0);
-                            pex_ctx.set("id", pid as f64);
+                            pex_ctx.set("t", crate::particleex::Value::Num(t));
+                            pex_ctx.set("x", crate::particleex::Value::Num(px as f64));
+                            pex_ctx.set("y", crate::particleex::Value::Num(py as f64));
+                            pex_ctx.set("z", crate::particleex::Value::Num(0.0));
+                            pex_ctx.set("cr", crate::particleex::Value::Num(r as f64 / 255.0));
+                            pex_ctx.set("cg", crate::particleex::Value::Num(g as f64 / 255.0));
+                            pex_ctx.set("cb", crate::particleex::Value::Num(b as f64 / 255.0));
+                            pex_ctx.set("alpha", crate::particleex::Value::Num(1.0));
+                            pex_ctx.set("mpsize", crate::particleex::Value::Num(point_size as f64));
+                            pex_ctx.set("vx", crate::particleex::Value::Num(0.0));
+                            pex_ctx.set("vy", crate::particleex::Value::Num(0.0));
+                            pex_ctx.set("vz", crate::particleex::Value::Num(0.0));
+                            pex_ctx.set("destroy", crate::particleex::Value::Num(0.0));
+                            pex_ctx.set("id", crate::particleex::Value::Num(pid as f64));
 
                             if let Some(ref s) = stmts {
                                 crate::particleex::exec_stmts(s, &mut pex_ctx);
                             }
 
-                            if pex_ctx.get("destory") >= 1.0 {
+                            if pex_ctx.get("destroy").as_num() >= 1.0 {
                                 pid += 1;
                                 continue; // skip destroyed particles
                             }
 
-                            let final_x = px + pex_ctx.get("vx") as f32;
-                            let final_y = py + pex_ctx.get("vy") as f32;
-                            let final_z = pex_ctx.get("vz") as f32;
-                            let final_r = (pex_ctx.get("cr").clamp(0.0, 1.0) * 255.0) as u8;
-                            let final_g = (pex_ctx.get("cg").clamp(0.0, 1.0) * 255.0) as u8;
-                            let final_b = (pex_ctx.get("cb").clamp(0.0, 1.0) * 255.0) as u8;
-                            let final_a = (pex_ctx.get("alpha").clamp(0.0, 1.0) * 255.0) as u8;
-                            let final_size = pex_ctx.get("mpsize") as f32;
+                            let final_x = px + pex_ctx.get("vx").as_num() as f32;
+                            let final_y = py + pex_ctx.get("vy").as_num() as f32;
+                            let final_z = pex_ctx.get("vz").as_num() as f32;
+                            let final_r =
+                                (pex_ctx.get("cr").as_num().clamp(0.0, 1.0) * 255.0) as u8;
+                            let final_g =
+                                (pex_ctx.get("cg").as_num().clamp(0.0, 1.0) * 255.0) as u8;
+                            let final_b =
+                                (pex_ctx.get("cb").as_num().clamp(0.0, 1.0) * 255.0) as u8;
+                            let final_a =
+                                (pex_ctx.get("alpha").as_num().clamp(0.0, 1.0) * 255.0) as u8;
+                            let final_size = pex_ctx.get("mpsize").as_num() as f32;
 
                             frame_particles.push(Particle {
                                 id: pid,

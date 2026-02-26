@@ -19,16 +19,17 @@ const TIME_SCALE: f64 = 3.0;
 pub enum Token {
     Num(f64),
     Ident(String),
-    Op(char), // single-char operator  + - * / % ^ , ; ( )
-    Eq,       // ==
-    Ne,       // !=
-    Le,       // <=
-    Ge,       // >=
-    And,      // &&
-    Or,       // ||
-    Assign,   // = (single)
-    Lt,       // <
-    Gt,       // >
+    Op(char),    // single-char operator  + - * / % ^ , ; ( )
+    DoubleComma, // ,,
+    Eq,          // ==
+    Ne,          // !=
+    Le,          // <=
+    Ge,          // >=
+    And,         // &&
+    Or,          // ||
+    Assign,      // = (single)
+    Lt,          // <
+    Gt,          // >
 }
 
 pub fn tokenize(src: &str) -> Vec<Token> {
@@ -110,6 +111,11 @@ pub fn tokenize(src: &str) -> Vec<Token> {
                     i += 2;
                     continue;
                 }
+                (',', ',') => {
+                    tokens.push(Token::DoubleComma);
+                    i += 2;
+                    continue;
+                }
                 _ => {}
             }
         }
@@ -159,6 +165,7 @@ pub enum Expr {
     Call(String, Vec<Expr>),
     #[allow(dead_code)]
     Conditional(Box<Expr>, Box<Expr>, Box<Expr>),
+    MatrixBuilder(Vec<Vec<Expr>>),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -351,9 +358,34 @@ impl Parser {
             }
             Some(Token::Op('(')) => {
                 self.advance();
-                let expr = self.parse_expr();
+                let mut rows = Vec::new();
+                let mut current_row = Vec::new();
+
+                current_row.push(self.parse_expr());
+
+                let mut is_matrix = false;
+                loop {
+                    if self.matches_op(',') {
+                        self.advance();
+                        current_row.push(self.parse_expr());
+                        is_matrix = true;
+                    } else if matches!(self.peek(), Some(Token::DoubleComma)) {
+                        self.advance();
+                        rows.push(std::mem::take(&mut current_row));
+                        current_row.push(self.parse_expr());
+                        is_matrix = true;
+                    } else {
+                        break;
+                    }
+                }
                 self.eat_op(')');
-                expr
+
+                if is_matrix {
+                    rows.push(current_row);
+                    Expr::MatrixBuilder(rows)
+                } else {
+                    current_row.pop().unwrap_or(Expr::Num(0.0))
+                }
             }
             _ => {
                 // Fallback: return 0
@@ -451,231 +483,438 @@ pub fn parse_statements(tokens: Vec<Token>) -> Vec<Stmt> {
     stmts
 }
 
+#[derive(Debug, Clone)]
+pub enum Value {
+    Num(f64),
+    Matrix(Vec<Vec<f64>>),
+}
+
+impl Value {
+    pub fn as_num(&self) -> f64 {
+        match self {
+            Value::Num(n) => *n,
+            Value::Matrix(m) => m
+                .first()
+                .and_then(|row| row.first())
+                .copied()
+                .unwrap_or(0.0),
+        }
+    }
+
+    pub fn is_true(&self) -> bool {
+        match self {
+            Value::Num(n) => *n != 0.0,
+            Value::Matrix(m) => !m.is_empty() && !m[0].is_empty() && m[0][0] != 0.0,
+        }
+    }
+}
+
 // ─── Evaluator context ───
 
 #[derive(Clone)]
 pub struct ExprContext {
-    pub vars: HashMap<String, f64>,
+    pub vars: HashMap<String, Value>,
 }
 
 impl ExprContext {
     pub fn new() -> Self {
         let mut vars = HashMap::new();
-        vars.insert("PI".into(), PI);
-        vars.insert("E".into(), E);
+        vars.insert("PI".into(), Value::Num(PI));
+        vars.insert("E".into(), Value::Num(E));
         Self { vars }
     }
 
-    pub fn get(&self, name: &str) -> f64 {
-        self.vars.get(name).copied().unwrap_or(0.0)
+    pub fn get(&self, name: &str) -> Value {
+        self.vars.get(name).cloned().unwrap_or(Value::Num(0.0))
     }
 
-    pub fn set(&mut self, name: &str, val: f64) {
+    pub fn set(&mut self, name: &str, val: Value) {
         self.vars.insert(name.to_string(), val);
     }
 }
 
-pub fn eval_expr(expr: &Expr, ctx: &mut ExprContext) -> f64 {
+pub fn eval_expr(expr: &Expr, ctx: &mut ExprContext) -> Value {
     match expr {
-        Expr::Num(n) => *n,
+        Expr::Num(n) => Value::Num(*n),
         Expr::Var(name) => ctx.get(name),
         Expr::BinOp(l, op, r) => {
             let lv = eval_expr(l, ctx);
             let rv = eval_expr(r, ctx);
             match op {
-                BinOp::Add => lv + rv,
-                BinOp::Sub => lv - rv,
-                BinOp::Mul => lv * rv,
+                BinOp::Add => match (lv, rv) {
+                    (Value::Num(a), Value::Num(b)) => Value::Num(a + b),
+                    (Value::Matrix(mut m1), Value::Matrix(m2)) => {
+                        if !m1.is_empty()
+                            && !m2.is_empty()
+                            && m1.len() == m2.len()
+                            && m1[0].len() == m2[0].len()
+                        {
+                            for i in 0..m1.len() {
+                                for j in 0..m1[0].len() {
+                                    m1[i][j] += m2[i][j];
+                                }
+                            }
+                            Value::Matrix(m1)
+                        } else {
+                            Value::Num(0.0)
+                        }
+                    }
+                    _ => Value::Num(0.0),
+                },
+                BinOp::Sub => match (lv, rv) {
+                    (Value::Num(a), Value::Num(b)) => Value::Num(a - b),
+                    (Value::Matrix(mut m1), Value::Matrix(m2)) => {
+                        if !m1.is_empty()
+                            && !m2.is_empty()
+                            && m1.len() == m2.len()
+                            && m1[0].len() == m2[0].len()
+                        {
+                            for i in 0..m1.len() {
+                                for j in 0..m1[0].len() {
+                                    m1[i][j] -= m2[i][j];
+                                }
+                            }
+                            Value::Matrix(m1)
+                        } else {
+                            Value::Num(0.0)
+                        }
+                    }
+                    _ => Value::Num(0.0),
+                },
+                BinOp::Mul => match (lv, rv) {
+                    (Value::Num(a), Value::Num(b)) => Value::Num(a * b),
+                    (Value::Num(s), Value::Matrix(mut m))
+                    | (Value::Matrix(mut m), Value::Num(s)) => {
+                        for row in &mut m {
+                            for v in row {
+                                *v *= s;
+                            }
+                        }
+                        Value::Matrix(m)
+                    }
+                    (Value::Matrix(m1), Value::Matrix(m2)) => {
+                        if m1.is_empty() || m2.is_empty() || m1[0].len() != m2.len() {
+                            Value::Num(0.0)
+                        } else {
+                            let r1 = m1.len();
+                            let c1 = m1[0].len();
+                            let c2 = m2[0].len();
+                            let mut result = vec![vec![0.0; c2]; r1];
+                            for i in 0..r1 {
+                                for j in 0..c2 {
+                                    for k in 0..c1 {
+                                        result[i][j] += m1[i][k] * m2[k][j];
+                                    }
+                                }
+                            }
+                            Value::Matrix(result)
+                        }
+                    }
+                },
                 BinOp::Div => {
-                    if rv.abs() < 1e-15 {
-                        0.0
+                    let (la, ra) = (lv.as_num(), rv.as_num());
+                    if ra.abs() < 1e-15 {
+                        Value::Num(0.0)
                     } else {
-                        lv / rv
+                        Value::Num(la / ra)
                     }
                 }
                 BinOp::Mod => {
-                    if rv.abs() < 1e-15 {
-                        0.0
+                    let (la, ra) = (lv.as_num(), rv.as_num());
+                    if ra.abs() < 1e-15 {
+                        Value::Num(0.0)
                     } else {
-                        lv % rv
+                        Value::Num(la % ra)
                     }
                 }
-                BinOp::Pow => lv.powf(rv),
-                BinOp::Eq => {
-                    if (lv - rv).abs() < 1e-10 {
-                        1.0
-                    } else {
-                        0.0
+                BinOp::Pow => Value::Num(lv.as_num().powf(rv.as_num())),
+                BinOp::Eq => Value::Num(if (lv.as_num() - rv.as_num()).abs() < 1e-10 {
+                    1.0
+                } else {
+                    0.0
+                }),
+                BinOp::Ne => Value::Num(if (lv.as_num() - rv.as_num()).abs() >= 1e-10 {
+                    1.0
+                } else {
+                    0.0
+                }),
+                BinOp::Lt => Value::Num(if lv.as_num() < rv.as_num() { 1.0 } else { 0.0 }),
+                BinOp::Gt => Value::Num(if lv.as_num() > rv.as_num() { 1.0 } else { 0.0 }),
+                BinOp::Le => Value::Num(if lv.as_num() <= rv.as_num() { 1.0 } else { 0.0 }),
+                BinOp::Ge => Value::Num(if lv.as_num() >= rv.as_num() { 1.0 } else { 0.0 }),
+                BinOp::And => Value::Num(if lv.is_true() && rv.is_true() {
+                    1.0
+                } else {
+                    0.0
+                }),
+                BinOp::Or => Value::Num(if lv.is_true() || rv.is_true() {
+                    1.0
+                } else {
+                    0.0
+                }),
+            }
+        }
+        Expr::UnaryNeg(e) => {
+            let v = eval_expr(e, ctx);
+            match v {
+                Value::Num(n) => Value::Num(-n),
+                Value::Matrix(mut m) => {
+                    for row in &mut m {
+                        for x in row {
+                            *x = -*x;
+                        }
                     }
-                }
-                BinOp::Ne => {
-                    if (lv - rv).abs() >= 1e-10 {
-                        1.0
-                    } else {
-                        0.0
-                    }
-                }
-                BinOp::Lt => {
-                    if lv < rv {
-                        1.0
-                    } else {
-                        0.0
-                    }
-                }
-                BinOp::Gt => {
-                    if lv > rv {
-                        1.0
-                    } else {
-                        0.0
-                    }
-                }
-                BinOp::Le => {
-                    if lv <= rv {
-                        1.0
-                    } else {
-                        0.0
-                    }
-                }
-                BinOp::Ge => {
-                    if lv >= rv {
-                        1.0
-                    } else {
-                        0.0
-                    }
-                }
-                BinOp::And => {
-                    if lv != 0.0 && rv != 0.0 {
-                        1.0
-                    } else {
-                        0.0
-                    }
-                }
-                BinOp::Or => {
-                    if lv != 0.0 || rv != 0.0 {
-                        1.0
-                    } else {
-                        0.0
-                    }
+                    Value::Matrix(m)
                 }
             }
         }
-        Expr::UnaryNeg(e) => -eval_expr(e, ctx),
-        Expr::UnaryNot(e) => {
-            if eval_expr(e, ctx) == 0.0 {
-                1.0
-            } else {
-                0.0
-            }
-        }
+        Expr::UnaryNot(e) => Value::Num(if eval_expr(e, ctx).is_true() {
+            0.0
+        } else {
+            1.0
+        }),
         Expr::Call(name, args) => {
             let mut rng = rand::thread_rng();
-            let a: Vec<f64> = args.iter().map(|e| eval_expr(e, ctx)).collect();
+            let a: Vec<Value> = args.iter().map(|e| eval_expr(e, ctx)).collect();
+            let nums: Vec<f64> = a.iter().map(|v| v.as_num()).collect();
+
             match name.as_str() {
-                "sin" => a.first().copied().unwrap_or(0.0).sin(),
-                "cos" => a.first().copied().unwrap_or(0.0).cos(),
-                "tan" => a.first().copied().unwrap_or(0.0).tan(),
-                "asin" => a.first().copied().unwrap_or(0.0).asin(),
-                "acos" => a.first().copied().unwrap_or(0.0).acos(),
-                "atan" => a.first().copied().unwrap_or(0.0).atan(),
+                "sin" => Value::Num(nums.first().copied().unwrap_or(0.0).sin()),
+                "cos" => Value::Num(nums.first().copied().unwrap_or(0.0).cos()),
+                "tan" => Value::Num(nums.first().copied().unwrap_or(0.0).tan()),
+                "asin" => Value::Num(nums.first().copied().unwrap_or(0.0).asin()),
+                "acos" => Value::Num(nums.first().copied().unwrap_or(0.0).acos()),
+                "atan" => Value::Num(nums.first().copied().unwrap_or(0.0).atan()),
                 "atan2" => {
-                    let y = a.first().copied().unwrap_or(0.0);
-                    let x = a.get(1).copied().unwrap_or(0.0);
-                    y.atan2(x)
+                    let y = nums.first().copied().unwrap_or(0.0);
+                    let x = nums.get(1).copied().unwrap_or(0.0);
+                    Value::Num(y.atan2(x))
                 }
-                "sinh" => a.first().copied().unwrap_or(0.0).sinh(),
-                "cosh" => a.first().copied().unwrap_or(0.0).cosh(),
-                "tanh" => a.first().copied().unwrap_or(0.0).tanh(),
-                "exp" => a.first().copied().unwrap_or(0.0).exp(),
-                "log" | "ln" => a.first().copied().unwrap_or(0.0).ln(),
-                "log10" => a.first().copied().unwrap_or(0.0).log10(),
-                "expm1" => a.first().copied().unwrap_or(0.0).exp_m1(),
-                "log1p" => a.first().copied().unwrap_or(0.0).ln_1p(),
+                "sinh" => Value::Num(nums.first().copied().unwrap_or(0.0).sinh()),
+                "cosh" => Value::Num(nums.first().copied().unwrap_or(0.0).cosh()),
+                "tanh" => Value::Num(nums.first().copied().unwrap_or(0.0).tanh()),
+                "exp" => Value::Num(nums.first().copied().unwrap_or(0.0).exp()),
+                "log" | "ln" => Value::Num(nums.first().copied().unwrap_or(0.0).ln()),
+                "log10" => Value::Num(nums.first().copied().unwrap_or(0.0).log10()),
+                "expm1" => Value::Num(nums.first().copied().unwrap_or(0.0).exp_m1()),
+                "log1p" => Value::Num(nums.first().copied().unwrap_or(0.0).ln_1p()),
                 "pow" => {
-                    let base = a.first().copied().unwrap_or(0.0);
-                    let exp = a.get(1).copied().unwrap_or(0.0);
-                    base.powf(exp)
+                    let base = nums.first().copied().unwrap_or(0.0);
+                    let exp = nums.get(1).copied().unwrap_or(0.0);
+                    Value::Num(base.powf(exp))
                 }
-                "sqrt" => a.first().copied().unwrap_or(0.0).sqrt(),
-                "cbrt" => a.first().copied().unwrap_or(0.0).cbrt(),
+                "sqrt" => Value::Num(nums.first().copied().unwrap_or(0.0).sqrt()),
+                "cbrt" => Value::Num(nums.first().copied().unwrap_or(0.0).cbrt()),
                 "hypot" => {
-                    let x = a.first().copied().unwrap_or(0.0);
-                    let y = a.get(1).copied().unwrap_or(0.0);
-                    x.hypot(y)
+                    let x = nums.first().copied().unwrap_or(0.0);
+                    let y = nums.get(1).copied().unwrap_or(0.0);
+                    Value::Num(x.hypot(y))
                 }
-                "ceil" => a.first().copied().unwrap_or(0.0).ceil(),
-                "floor" => a.first().copied().unwrap_or(0.0).floor(),
-                "round" | "rint" => a.first().copied().unwrap_or(0.0).round(),
+                "ceil" => Value::Num(nums.first().copied().unwrap_or(0.0).ceil()),
+                "floor" => Value::Num(nums.first().copied().unwrap_or(0.0).floor()),
+                "round" | "rint" => Value::Num(nums.first().copied().unwrap_or(0.0).round()),
                 "max" => {
-                    let x = a.first().copied().unwrap_or(0.0);
-                    let y = a.get(1).copied().unwrap_or(0.0);
-                    x.max(y)
+                    let x = nums.first().copied().unwrap_or(0.0);
+                    let y = nums.get(1).copied().unwrap_or(0.0);
+                    Value::Num(x.max(y))
                 }
                 "min" => {
-                    let x = a.first().copied().unwrap_or(0.0);
-                    let y = a.get(1).copied().unwrap_or(0.0);
-                    x.min(y)
+                    let x = nums.first().copied().unwrap_or(0.0);
+                    let y = nums.get(1).copied().unwrap_or(0.0);
+                    Value::Num(x.min(y))
                 }
                 "abs" | "signum" => {
-                    let v = a.first().copied().unwrap_or(0.0);
+                    let v = nums.first().copied().unwrap_or(0.0);
                     if name == "abs" {
-                        v.abs()
+                        Value::Num(v.abs())
                     } else {
-                        v.signum()
+                        Value::Num(v.signum())
                     }
                 }
-                "random" => rng.gen::<f64>(),
-                "toRadians" => a.first().copied().unwrap_or(0.0).to_radians(),
-                "toDegrees" => a.first().copied().unwrap_or(0.0).to_degrees(),
-                // Exact arithmetic (just regular math in f64, no overflow check needed)
-                "addExact" => {
-                    let x = a.first().copied().unwrap_or(0.0);
-                    let y = a.get(1).copied().unwrap_or(0.0);
-                    x + y
+                "random" => Value::Num(rng.gen::<f64>()),
+                "toRadians" => Value::Num(nums.first().copied().unwrap_or(0.0).to_radians()),
+                "toDegrees" => Value::Num(nums.first().copied().unwrap_or(0.0).to_degrees()),
+                "clamp" => {
+                    let val = nums.first().copied().unwrap_or(0.0);
+                    let min = nums.get(1).copied().unwrap_or(0.0);
+                    let max = nums.get(2).copied().unwrap_or(0.0);
+                    Value::Num(val.clamp(min, max))
                 }
+                "lerp" => {
+                    let delta = nums.first().copied().unwrap_or(0.0);
+                    let start = nums.get(1).copied().unwrap_or(0.0);
+                    let end = nums.get(2).copied().unwrap_or(0.0);
+                    Value::Num(start + delta * (end - start))
+                }
+                "lerpInt" => {
+                    let delta = nums.first().copied().unwrap_or(0.0);
+                    let start = nums.get(1).copied().unwrap_or(0.0);
+                    let end = nums.get(2).copied().unwrap_or(0.0);
+                    Value::Num((start + delta * (end - start)).floor())
+                }
+                "floorMod" | "IEEEremainder" => {
+                    let x = nums.first().copied().unwrap_or(0.0);
+                    let y = nums.get(1).copied().unwrap_or(1.0);
+                    Value::Num(x.rem_euclid(y))
+                }
+                "fma" => {
+                    let x = nums.first().copied().unwrap_or(0.0);
+                    let y = nums.get(1).copied().unwrap_or(0.0);
+                    let z = nums.get(2).copied().unwrap_or(0.0);
+                    Value::Num(x.mul_add(y, z))
+                }
+                "copySign" => {
+                    let magnitude = nums.first().copied().unwrap_or(0.0);
+                    let sign = nums.get(1).copied().unwrap_or(0.0);
+                    Value::Num(magnitude.copysign(sign))
+                }
+                "getExponent" => {
+                    let v = nums.first().copied().unwrap_or(0.0);
+                    Value::Num(((v.to_bits() >> 52) & 0x7FF) as f64 - 1023.0)
+                }
+                "addExact" => Value::Num(
+                    nums.first().copied().unwrap_or(0.0) + nums.get(1).copied().unwrap_or(0.0),
+                ),
+                "multiplyExact" => Value::Num(
+                    nums.first().copied().unwrap_or(0.0) * nums.get(1).copied().unwrap_or(0.0),
+                ),
                 "nextUp" => {
-                    let v = a.first().copied().unwrap_or(0.0);
-                    f64::from_bits(v.to_bits() + 1)
+                    let v = nums.first().copied().unwrap_or(0.0);
+                    Value::Num(f64::from_bits(v.to_bits().wrapping_add(1)))
                 }
                 "nextDown" => {
-                    let v = a.first().copied().unwrap_or(0.0);
-                    f64::from_bits(v.to_bits() - 1)
+                    let v = nums.first().copied().unwrap_or(0.0);
+                    Value::Num(f64::from_bits(v.to_bits().wrapping_sub(1)))
                 }
-                // Bit scaling
                 "scalb" => {
-                    let d = a.first().copied().unwrap_or(0.0);
-                    let sf = a.get(1).copied().unwrap_or(0.0) as i32;
-                    d * 2.0_f64.powi(sf)
+                    let d = nums.first().copied().unwrap_or(0.0);
+                    let sf = nums.get(1).copied().unwrap_or(0.0) as i32;
+                    Value::Num(d * 2.0_f64.powi(sf))
                 }
-                _ => 0.0,
+                "translate" => {
+                    let x = nums.get(0).copied().unwrap_or(0.0);
+                    let y = nums.get(1).copied().unwrap_or(0.0);
+                    let z = nums.get(2).copied().unwrap_or(0.0);
+                    Value::Matrix(vec![
+                        vec![1.0, 0.0, 0.0, x],
+                        vec![0.0, 1.0, 0.0, y],
+                        vec![0.0, 0.0, 1.0, z],
+                        vec![0.0, 0.0, 0.0, 1.0],
+                    ])
+                }
+                "scale" => {
+                    let x = nums.get(0).copied().unwrap_or(1.0);
+                    let y = nums.get(1).copied().unwrap_or(1.0);
+                    let z = nums.get(2).copied().unwrap_or(1.0);
+                    Value::Matrix(vec![
+                        vec![x, 0.0, 0.0, 0.0],
+                        vec![0.0, y, 0.0, 0.0],
+                        vec![0.0, 0.0, z, 0.0],
+                        vec![0.0, 0.0, 0.0, 1.0],
+                    ])
+                }
+                "rotate" | "rotateDeg" => {
+                    let mut p = nums.get(0).copied().unwrap_or(0.0);
+                    let mut y = nums.get(1).copied().unwrap_or(0.0);
+                    let mut r = nums.get(2).copied().unwrap_or(0.0);
+
+                    if name == "rotateDeg" {
+                        p = p.to_radians();
+                        y = y.to_radians();
+                        r = r.to_radians();
+                    }
+
+                    let (cp, sp) = (p.cos(), p.sin());
+                    let (cy, sy) = (y.cos(), y.sin());
+                    let (cr, sr) = (r.cos(), r.sin());
+
+                    // 按照 Z * Y * X 顺序复合的欧拉角矩阵
+                    Value::Matrix(vec![
+                        vec![cy * cr, sy * sp * cr - cp * sr, sy * cp * cr + sp * sr, 0.0],
+                        vec![cy * sr, sy * sp * sr + cp * cr, sy * cp * sr - sp * cr, 0.0],
+                        vec![-sy, cy * sp, cy * cp, 0.0],
+                        vec![0.0, 0.0, 0.0, 1.0],
+                    ])
+                }
+                "transpose" => {
+                    if let Some(Value::Matrix(m)) = a.get(0) {
+                        if m.is_empty() || m[0].is_empty() {
+                            return Value::Matrix(vec![]);
+                        }
+                        let rows = m.len();
+                        let cols = m[0].len();
+                        let mut res = vec![vec![0.0; rows]; cols];
+                        for i in 0..rows {
+                            for j in 0..cols {
+                                res[j][i] = m[i][j];
+                            }
+                        }
+                        Value::Matrix(res)
+                    } else {
+                        Value::Num(0.0)
+                    }
+                }
+                _ => Value::Num(0.0),
             }
         }
         Expr::Conditional(cond, then, else_) => {
-            if eval_expr(cond, ctx) != 0.0 {
+            if eval_expr(cond, ctx).is_true() {
                 eval_expr(then, ctx)
             } else {
                 eval_expr(else_, ctx)
             }
         }
+        Expr::MatrixBuilder(rows) => {
+            let mut res_rows = Vec::new();
+            for r in rows {
+                let mut res_row = Vec::new();
+                for e in r {
+                    res_row.push(eval_expr(e, ctx).as_num());
+                }
+                res_rows.push(res_row);
+            }
+            Value::Matrix(res_rows)
+        }
     }
 }
 
-pub fn exec_stmts(stmts: &[Stmt], ctx: &mut ExprContext) -> f64 {
-    let mut last_val = 0.0;
+pub fn exec_stmts(stmts: &[Stmt], ctx: &mut ExprContext) -> Value {
+    let mut last_val = Value::Num(0.0);
     for stmt in stmts {
         last_val = match stmt {
             Stmt::Assign(name, expr) => {
                 let val = eval_expr(expr, ctx);
-                ctx.set(name, val);
+                ctx.set(name, val.clone());
                 val
             }
             Stmt::MultiAssign(names, exprs) => {
-                let mut v = 0.0;
-                let vals: Vec<f64> = exprs.iter().map(|e| eval_expr(e, ctx)).collect();
-                for (i, name) in names.iter().enumerate() {
-                    v = vals.get(i).copied().unwrap_or(0.0);
-                    ctx.set(name, v);
+                let vals: Vec<Value> = exprs.iter().map(|e| eval_expr(e, ctx)).collect();
+
+                // 矩阵解构：如果右侧只有一个表达式，且结果是矩阵，将其展平赋值
+                if vals.len() == 1 {
+                    if let Value::Matrix(m) = &vals[0] {
+                        let mut flat = Vec::new();
+                        for row in m {
+                            for val in row {
+                                flat.push(*val);
+                            }
+                        }
+                        for (i, name) in names.iter().enumerate() {
+                            let v = flat.get(i).copied().unwrap_or(0.0);
+                            ctx.set(name, Value::Num(v));
+                        }
+                        return vals[0].clone();
+                    }
                 }
-                v
+
+                // 原有的普通多变量赋值 (如 a, b = 1, 2)
+                let mut last_v = Value::Num(0.0);
+                for (i, name) in names.iter().enumerate() {
+                    let v = vals.get(i).cloned().unwrap_or(Value::Num(0.0));
+                    ctx.set(name, v.clone());
+                    last_v = v;
+                }
+                last_v
             }
             Stmt::ExprStmt(expr) => eval_expr(expr, ctx),
         };
@@ -815,11 +1054,19 @@ struct ParsedCommand {
 }
 
 fn parse_coord(val: &str) -> f64 {
+    let is_relative = val.starts_with('~');
     let s = val.replace('~', "");
-    if s.is_empty() {
+    let num = if s.is_empty() {
         0.0
     } else {
         s.parse::<f64>().unwrap_or(0.0)
+    };
+
+    // 如果是相对坐标，或者是不包含小数点的整数，自动 +0.5 居中
+    if is_relative || !val.contains('.') {
+        num + 0.5
+    } else {
+        num
     }
 }
 
@@ -1088,25 +1335,25 @@ fn generate_tracks(cmd: &ParsedCommand, start_id: i32) -> (Vec<Track>, i32) {
                 let mut cz = -cmd.range[2];
                 while cz <= cmd.range[2] + 0.0001 {
                     let mut ctx = ExprContext::new();
-                    ctx.set("x", cx);
-                    ctx.set("y", cy);
-                    ctx.set("z", cz);
-                    ctx.set("s1", 0.0);
-                    ctx.set("s2", 0.0);
-                    ctx.set("dis", (cx * cx + cy * cy + cz * cz).sqrt());
-                    ctx.set("cr", cmd.color[0]);
-                    ctx.set("cg", cmd.color[1]);
-                    ctx.set("cb", cmd.color[2]);
-                    ctx.set("alpha", cmd.color[3]);
+                    ctx.set("x", Value::Num(cx));
+                    ctx.set("y", Value::Num(cy));
+                    ctx.set("z", Value::Num(cz));
+                    ctx.set("s1", Value::Num(0.0));
+                    ctx.set("s2", Value::Num(0.0));
+                    ctx.set("dis", Value::Num((cx * cx + cy * cy + cz * cz).sqrt()));
+                    ctx.set("cr", Value::Num(cmd.color[0]));
+                    ctx.set("cg", Value::Num(cmd.color[1]));
+                    ctx.set("cb", Value::Num(cmd.color[2]));
+                    ctx.set("alpha", Value::Num(cmd.color[3]));
 
                     // Evaluate condition: result ≠ 0 means spawn
                     let spawn = if let Some(ref stmts) = cond_stmts {
-                        exec_stmts(stmts, &mut ctx) != 0.0
+                        exec_stmts(stmts, &mut ctx).is_true()
                     } else {
                         true
                     };
 
-                    if spawn && ctx.get("destroy") == 0.0 {
+                    if spawn && !ctx.get("destroy").is_true() {
                         let mut track = Track {
                             id: current_id,
                             keyframes: Vec::new(),
@@ -1122,49 +1369,49 @@ fn generate_tracks(cmd: &ParsedCommand, start_id: i32) -> (Vec<Track>, i32) {
 
                         let total_frames = (cmd.lifespan as f64 * TIME_SCALE).floor() as u32;
                         let mut sctx = ExprContext::new();
-                        sctx.set("x", cx);
-                        sctx.set("y", cy);
-                        sctx.set("z", cz);
-                        sctx.set("vx", cur_vx);
-                        sctx.set("vy", cur_vy);
-                        sctx.set("vz", cur_vz);
+                        sctx.set("x", Value::Num(cx));
+                        sctx.set("y", Value::Num(cy));
+                        sctx.set("z", Value::Num(cz));
+                        sctx.set("vx", Value::Num(cur_vx));
+                        sctx.set("vy", Value::Num(cur_vy));
+                        sctx.set("vz", Value::Num(cur_vz));
                         sctx.set("cr", ctx.get("cr"));
                         sctx.set("cg", ctx.get("cg"));
                         sctx.set("cb", ctx.get("cb"));
                         sctx.set("alpha", ctx.get("alpha"));
-                        sctx.set("mpsize", 0.1);
-                        sctx.set("age", 0.0);
-                        sctx.set("t", 0.0);
-                        sctx.set("destroy", 0.0);
+                        sctx.set("mpsize", Value::Num(0.1));
+                        sctx.set("age", Value::Num(0.0));
+                        sctx.set("t", Value::Num(0.0));
+                        sctx.set("destroy", Value::Num(0.0));
 
                         for f in 0..total_frames {
-                            sctx.set("age", f as f64 / TIME_SCALE);
-                            sctx.set("t", f as f64 / TIME_SCALE);
-                            sctx.set("x", cur_x - cmd.center[0]);
-                            sctx.set("y", cur_y - cmd.center[1]);
-                            sctx.set("z", cur_z - cmd.center[2]);
-                            sctx.set("vx", cur_vx);
-                            sctx.set("vy", cur_vy);
-                            sctx.set("vz", cur_vz);
+                            sctx.set("age", Value::Num(f as f64 / TIME_SCALE));
+                            sctx.set("t", Value::Num(f as f64 / TIME_SCALE));
+                            sctx.set("x", Value::Num(cur_x - cmd.center[0]));
+                            sctx.set("y", Value::Num(cur_y - cmd.center[1]));
+                            sctx.set("z", Value::Num(cur_z - cmd.center[2]));
+                            sctx.set("vx", Value::Num(cur_vx));
+                            sctx.set("vy", Value::Num(cur_vy));
+                            sctx.set("vz", Value::Num(cur_vz));
 
                             if let Some(ref stmts) = speed_stmts {
                                 exec_stmts(stmts, &mut sctx);
-                                cur_vx = sctx.get("vx");
-                                cur_vy = sctx.get("vy");
-                                cur_vz = sctx.get("vz");
-                                cur_x = cmd.center[0] + sctx.get("x");
-                                cur_y = cmd.center[1] + sctx.get("y");
-                                cur_z = cmd.center[2] + sctx.get("z");
+                                cur_vx = sctx.get("vx").as_num();
+                                cur_vy = sctx.get("vy").as_num();
+                                cur_vz = sctx.get("vz").as_num();
+                                cur_x = cmd.center[0] + sctx.get("x").as_num();
+                                cur_y = cmd.center[1] + sctx.get("y").as_num();
+                                cur_z = cmd.center[2] + sctx.get("z").as_num();
                             }
 
-                            if sctx.get("destroy") != 0.0 {
+                            if sctx.get("destroy").is_true() {
                                 break;
                             }
 
-                            let cr_val = sctx.get("cr");
-                            let cg_val = sctx.get("cg");
-                            let cb_val = sctx.get("cb");
-                            let ca_val = sctx.get("alpha");
+                            let cr_val = sctx.get("cr").as_num();
+                            let cg_val = sctx.get("cg").as_num();
+                            let cb_val = sctx.get("cb").as_num();
+                            let ca_val = sctx.get("alpha").as_num();
 
                             track.keyframes.push(Keyframe {
                                 tick: f,
@@ -1175,7 +1422,7 @@ fn generate_tracks(cmd: &ParsedCommand, start_id: i32) -> (Vec<Track>, i32) {
                                 g: (cg_val * 255.0).clamp(0.0, 255.0) as u8,
                                 b: (cb_val * 255.0).clamp(0.0, 255.0) as u8,
                                 a: (ca_val * 255.0).clamp(0.0, 255.0) as u8,
-                                size: sctx.get("mpsize"),
+                                size: sctx.get("mpsize").as_num(),
                             });
 
                             cur_x += cur_vx / TIME_SCALE;
@@ -1229,54 +1476,54 @@ fn generate_tracks(cmd: &ParsedCommand, start_id: i32) -> (Vec<Track>, i32) {
             let mut cur_vz = cmd.base_velocity[2];
 
             let mut ctx = ExprContext::new();
-            ctx.set("x", offset_x);
-            ctx.set("y", offset_y);
-            ctx.set("z", offset_z);
-            ctx.set("vx", cur_vx);
-            ctx.set("vy", cur_vy);
-            ctx.set("vz", cur_vz);
-            ctx.set("cr", cmd.color[0]);
-            ctx.set("cg", cmd.color[1]);
-            ctx.set("cb", cmd.color[2]);
-            ctx.set("alpha", cmd.color[3]);
-            ctx.set("s1", 0.0);
-            ctx.set("s2", 0.0);
-            ctx.set("dis", 0.0);
-            ctx.set("mpsize", 0.1);
-            ctx.set("age", 0.0);
-            ctx.set("t", 0.0);
-            ctx.set("destroy", 0.0);
+            ctx.set("x", Value::Num(offset_x));
+            ctx.set("y", Value::Num(offset_y));
+            ctx.set("z", Value::Num(offset_z));
+            ctx.set("vx", Value::Num(cur_vx));
+            ctx.set("vy", Value::Num(cur_vy));
+            ctx.set("vz", Value::Num(cur_vz));
+            ctx.set("cr", Value::Num(cmd.color[0]));
+            ctx.set("cg", Value::Num(cmd.color[1]));
+            ctx.set("cb", Value::Num(cmd.color[2]));
+            ctx.set("alpha", Value::Num(cmd.color[3]));
+            ctx.set("s1", Value::Num(0.0));
+            ctx.set("s2", Value::Num(0.0));
+            ctx.set("dis", Value::Num(0.0));
+            ctx.set("mpsize", Value::Num(0.1));
+            ctx.set("age", Value::Num(0.0));
+            ctx.set("t", Value::Num(0.0));
+            ctx.set("destroy", Value::Num(0.0));
 
             let total_frames = (cmd.lifespan as f64 * TIME_SCALE).floor() as u32;
 
             for f in 0..total_frames {
-                ctx.set("age", f as f64 / TIME_SCALE);
-                ctx.set("t", f as f64 / TIME_SCALE);
-                ctx.set("x", cur_x - cmd.center[0]);
-                ctx.set("y", cur_y - cmd.center[1]);
-                ctx.set("z", cur_z - cmd.center[2]);
-                ctx.set("vx", cur_vx);
-                ctx.set("vy", cur_vy);
-                ctx.set("vz", cur_vz);
+                ctx.set("age", Value::Num(f as f64 / TIME_SCALE));
+                ctx.set("t", Value::Num(f as f64 / TIME_SCALE));
+                ctx.set("x", Value::Num(cur_x - cmd.center[0]));
+                ctx.set("y", Value::Num(cur_y - cmd.center[1]));
+                ctx.set("z", Value::Num(cur_z - cmd.center[2]));
+                ctx.set("vx", Value::Num(cur_vx));
+                ctx.set("vy", Value::Num(cur_vy));
+                ctx.set("vz", Value::Num(cur_vz));
 
                 if let Some(ref stmts) = speed_stmts {
                     exec_stmts(stmts, &mut ctx);
-                    cur_vx = ctx.get("vx");
-                    cur_vy = ctx.get("vy");
-                    cur_vz = ctx.get("vz");
-                    cur_x = cmd.center[0] + ctx.get("x");
-                    cur_y = cmd.center[1] + ctx.get("y");
-                    cur_z = cmd.center[2] + ctx.get("z");
+                    cur_vx = ctx.get("vx").as_num();
+                    cur_vy = ctx.get("vy").as_num();
+                    cur_vz = ctx.get("vz").as_num();
+                    cur_x = cmd.center[0] + ctx.get("x").as_num();
+                    cur_y = cmd.center[1] + ctx.get("y").as_num();
+                    cur_z = cmd.center[2] + ctx.get("z").as_num();
                 }
 
-                if ctx.get("destory") == 1.0 {
+                if ctx.get("destroy").is_true() {
                     break;
                 }
 
-                let cr_val = ctx.get("cr");
-                let cg_val = ctx.get("cg");
-                let cb_val = ctx.get("cb");
-                let ca_val = ctx.get("alpha");
+                let cr_val = ctx.get("cr").as_num();
+                let cg_val = ctx.get("cg").as_num();
+                let cb_val = ctx.get("cb").as_num();
+                let ca_val = ctx.get("alpha").as_num();
 
                 track.keyframes.push(Keyframe {
                     tick: f,
@@ -1287,7 +1534,7 @@ fn generate_tracks(cmd: &ParsedCommand, start_id: i32) -> (Vec<Track>, i32) {
                     g: (cg_val * 255.0).clamp(0.0, 255.0) as u8,
                     b: (cb_val * 255.0).clamp(0.0, 255.0) as u8,
                     a: (ca_val * 255.0).clamp(0.0, 255.0) as u8,
-                    size: ctx.get("mpsize"),
+                    size: ctx.get("mpsize").as_num(),
                 });
 
                 cur_x += cur_vx / TIME_SCALE;
@@ -1327,43 +1574,43 @@ fn generate_tracks(cmd: &ParsedCommand, start_id: i32) -> (Vec<Track>, i32) {
         current_id += 1;
 
         let mut ctx = ExprContext::new();
-        ctx.set("t", t_param);
-        ctx.set("x", 0.0);
-        ctx.set("y", 0.0);
-        ctx.set("z", 0.0);
-        ctx.set("vx", cmd.base_velocity[0]);
-        ctx.set("vy", cmd.base_velocity[1]);
-        ctx.set("vz", cmd.base_velocity[2]);
-        ctx.set("cr", cmd.color[0]);
-        ctx.set("cg", cmd.color[1]);
-        ctx.set("cb", cmd.color[2]);
-        ctx.set("alpha", cmd.color[3]);
-        ctx.set("s1", 0.0);
-        ctx.set("s2", 0.0);
-        ctx.set("dis", 0.0);
-        ctx.set("mpsize", 0.1);
-        ctx.set("age", 0.0);
-        ctx.set("destory", 0.0);
+        ctx.set("t", Value::Num(t_param));
+        ctx.set("x", Value::Num(0.0));
+        ctx.set("y", Value::Num(0.0));
+        ctx.set("z", Value::Num(0.0));
+        ctx.set("vx", Value::Num(cmd.base_velocity[0]));
+        ctx.set("vy", Value::Num(cmd.base_velocity[1]));
+        ctx.set("vz", Value::Num(cmd.base_velocity[2]));
+        ctx.set("cr", Value::Num(cmd.color[0]));
+        ctx.set("cg", Value::Num(cmd.color[1]));
+        ctx.set("cb", Value::Num(cmd.color[2]));
+        ctx.set("alpha", Value::Num(cmd.color[3]));
+        ctx.set("s1", Value::Num(0.0));
+        ctx.set("s2", Value::Num(0.0));
+        ctx.set("dis", Value::Num(0.0));
+        ctx.set("mpsize", Value::Num(0.1));
+        ctx.set("age", Value::Num(0.0));
+        ctx.set("destroy", Value::Num(0.0));
 
         if let Some(ref stmts) = shape_stmts {
             exec_stmts(stmts, &mut ctx);
         }
 
         if cmd.config.is_polar {
-            let dis = ctx.get("dis");
-            let s1 = ctx.get("s1");
-            let s2 = ctx.get("s2");
-            ctx.set("x", dis * s2.cos() * s1.cos());
-            ctx.set("y", dis * s2.sin());
-            ctx.set("z", dis * s2.cos() * s1.sin());
+            let dis = ctx.get("dis").as_num();
+            let s1 = ctx.get("s1").as_num();
+            let s2 = ctx.get("s2").as_num();
+            ctx.set("x", Value::Num(dis * s2.cos() * s1.cos()));
+            ctx.set("y", Value::Num(dis * s2.sin()));
+            ctx.set("z", Value::Num(dis * s2.cos() * s1.sin()));
         }
 
-        let mut cur_x = cmd.center[0] + ctx.get("x");
-        let mut cur_y = cmd.center[1] + ctx.get("y");
-        let mut cur_z = cmd.center[2] + ctx.get("z");
-        let mut cur_vx = ctx.get("vx");
-        let mut cur_vy = ctx.get("vy");
-        let mut cur_vz = ctx.get("vz");
+        let mut cur_x = cmd.center[0] + ctx.get("x").as_num();
+        let mut cur_y = cmd.center[1] + ctx.get("y").as_num();
+        let mut cur_z = cmd.center[2] + ctx.get("z").as_num();
+        let mut cur_vx = ctx.get("vx").as_num();
+        let mut cur_vy = ctx.get("vy").as_num();
+        let mut cur_vz = ctx.get("vz").as_num();
 
         let start_tick_offset = if cmd.config.is_animated {
             (particle_index / cmd.cpt.max(1)) as u32
@@ -1375,33 +1622,33 @@ fn generate_tracks(cmd: &ParsedCommand, start_id: i32) -> (Vec<Track>, i32) {
         let total_frames = (cmd.lifespan as f64 * TIME_SCALE).floor() as u32;
 
         for f in 0..total_frames {
-            ctx.set("age", f as f64 / TIME_SCALE);
-            ctx.set("t", f as f64 / TIME_SCALE);
-            ctx.set("x", cur_x - cmd.center[0]);
-            ctx.set("y", cur_y - cmd.center[1]);
-            ctx.set("z", cur_z - cmd.center[2]);
-            ctx.set("vx", cur_vx);
-            ctx.set("vy", cur_vy);
-            ctx.set("vz", cur_vz);
+            ctx.set("age", Value::Num(f as f64 / TIME_SCALE));
+            ctx.set("t", Value::Num(f as f64 / TIME_SCALE));
+            ctx.set("x", Value::Num(cur_x - cmd.center[0]));
+            ctx.set("y", Value::Num(cur_y - cmd.center[1]));
+            ctx.set("z", Value::Num(cur_z - cmd.center[2]));
+            ctx.set("vx", Value::Num(cur_vx));
+            ctx.set("vy", Value::Num(cur_vy));
+            ctx.set("vz", Value::Num(cur_vz));
 
             if let Some(ref stmts) = speed_stmts {
                 exec_stmts(stmts, &mut ctx);
-                cur_vx = ctx.get("vx");
-                cur_vy = ctx.get("vy");
-                cur_vz = ctx.get("vz");
-                cur_x = cmd.center[0] + ctx.get("x");
-                cur_y = cmd.center[1] + ctx.get("y");
-                cur_z = cmd.center[2] + ctx.get("z");
+                cur_vx = ctx.get("vx").as_num();
+                cur_vy = ctx.get("vy").as_num();
+                cur_vz = ctx.get("vz").as_num();
+                cur_x = cmd.center[0] + ctx.get("x").as_num();
+                cur_y = cmd.center[1] + ctx.get("y").as_num();
+                cur_z = cmd.center[2] + ctx.get("z").as_num();
             }
 
-            if ctx.get("destory") == 1.0 {
+            if ctx.get("destroy").is_true() {
                 break;
             }
 
-            let cr_val = ctx.get("cr");
-            let cg_val = ctx.get("cg");
-            let cb_val = ctx.get("cb");
-            let ca_val = ctx.get("alpha");
+            let cr_val = ctx.get("cr").as_num();
+            let cg_val = ctx.get("cg").as_num();
+            let cb_val = ctx.get("cb").as_num();
+            let ca_val = ctx.get("alpha").as_num();
 
             track.keyframes.push(Keyframe {
                 tick: start_tick_offset + f,
@@ -1412,7 +1659,7 @@ fn generate_tracks(cmd: &ParsedCommand, start_id: i32) -> (Vec<Track>, i32) {
                 g: (cg_val * 255.0).clamp(0.0, 255.0) as u8,
                 b: (cb_val * 255.0).clamp(0.0, 255.0) as u8,
                 a: (ca_val * 255.0).clamp(0.0, 255.0) as u8,
-                size: ctx.get("mpsize"),
+                size: ctx.get("mpsize").as_num(),
             });
 
             cur_x += cur_vx / TIME_SCALE;
