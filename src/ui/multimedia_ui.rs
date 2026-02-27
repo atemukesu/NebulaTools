@@ -366,19 +366,13 @@ impl NebulaToolsApp {
     }
 
     fn count_particles(&self, w: u32, h: u32, density: f32) -> usize {
-        let step = if density < 1.0 {
-            (1.0 / density).ceil() as u32
+        let total = (w * h) as f32;
+        let factor = if density < 1.0 {
+            density
         } else {
-            1u32
+            density.floor()
         };
-        let copies_per_pixel = if density >= 1.0 {
-            density.floor() as u32
-        } else {
-            1u32
-        };
-        let nx = w / step;
-        let ny = h / step;
-        (nx * ny * copies_per_pixel) as usize
+        (total * factor) as usize
     }
 
     fn estimate_multimedia_particles(&self) -> usize {
@@ -1174,6 +1168,9 @@ impl NebulaToolsApp {
                 py: f32,
                 pz: f32,
                 id: i32,
+                ox: f32,
+                oy: f32,
+                oz: f32,
             }
 
             let mut screen_pixels = Vec::new();
@@ -1206,6 +1203,9 @@ impl NebulaToolsApp {
                             py,
                             pz,
                             id: fixed_pid,
+                            ox: 0.0,
+                            oy: 0.0,
+                            oz: 0.0,
                         });
                         fixed_pid += 1;
                     }
@@ -1218,20 +1218,16 @@ impl NebulaToolsApp {
                 let mut frame_particles = Vec::with_capacity(screen_pixels.len());
                 let t = frame_count as f64 / target_fps as f64;
 
-                for sp in &screen_pixels {
+                for sp in &mut screen_pixels {
                     let r = buffer[sp.idx];
                     let g = buffer[sp.idx + 1];
                     let b = buffer[sp.idx + 2];
-                    let luma = (r as f32 * 0.299 + g as f32 * 0.587 + b as f32 * 0.114) / 255.0;
-                    if luma < brightness_threshold {
-                        continue;
-                    }
 
                     // Run velocity_expr per particle, cr/cg/cb override video pixel
                     pex_ctx.set("t", crate::particleex::Value::Num(t));
-                    pex_ctx.set("x", crate::particleex::Value::Num(sp.px as f64));
-                    pex_ctx.set("y", crate::particleex::Value::Num(sp.py as f64));
-                    pex_ctx.set("z", crate::particleex::Value::Num(sp.pz as f64));
+                    pex_ctx.set("x", crate::particleex::Value::Num((sp.px + sp.ox) as f64));
+                    pex_ctx.set("y", crate::particleex::Value::Num((sp.py + sp.oy) as f64));
+                    pex_ctx.set("z", crate::particleex::Value::Num((sp.pz + sp.oz) as f64));
                     pex_ctx.set("cr", crate::particleex::Value::Num(r as f64 / 255.0));
                     pex_ctx.set("cg", crate::particleex::Value::Num(g as f64 / 255.0));
                     pex_ctx.set("cb", crate::particleex::Value::Num(b as f64 / 255.0));
@@ -1247,13 +1243,19 @@ impl NebulaToolsApp {
                         crate::particleex::exec_stmts(s, &mut pex_ctx);
                     }
 
+                    sp.ox += pex_ctx.get("vx").as_num() as f32;
+                    sp.oy += pex_ctx.get("vy").as_num() as f32;
+                    sp.oz += pex_ctx.get("vz").as_num() as f32;
+
+                    let luma = (r as f32 * 0.299 + g as f32 * 0.587 + b as f32 * 0.114) / 255.0;
+                    if luma < brightness_threshold {
+                        continue;
+                    }
+
                     if pex_ctx.get("destroy").as_num() >= 1.0 {
                         continue; // skip destroyed particles
                     }
 
-                    let final_x = sp.px + pex_ctx.get("vx").as_num() as f32;
-                    let final_y = sp.py + pex_ctx.get("vy").as_num() as f32;
-                    let final_z = sp.pz + pex_ctx.get("vz").as_num() as f32;
                     let final_r = (pex_ctx.get("cr").as_num().clamp(0.0, 1.0) * 255.0) as u8;
                     let final_g = (pex_ctx.get("cg").as_num().clamp(0.0, 1.0) * 255.0) as u8;
                     let final_b = (pex_ctx.get("cb").as_num().clamp(0.0, 1.0) * 255.0) as u8;
@@ -1262,7 +1264,7 @@ impl NebulaToolsApp {
 
                     frame_particles.push(Particle {
                         id: sp.id,
-                        pos: [final_x, final_y, final_z],
+                        pos: [sp.px + sp.ox, sp.py + sp.oy, sp.pz + sp.oz],
                         color: [final_r, final_g, final_b, final_a],
                         size: final_size,
                         tex_id: 0,
