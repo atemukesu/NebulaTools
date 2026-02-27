@@ -380,14 +380,12 @@ impl NebulaToolsApp {
                     as usize
             }
             1 => {
-                if let Some(path) = &self.multimedia.media_path {
-                    if let Ok(reader) = image::ImageReader::open(path) {
-                        if let Ok((w, h)) = reader.into_dimensions() {
-                            return self.count_particles(w, h, density);
-                        }
-                    }
-                }
-                0
+                let [w, h] = self.multimedia.last_source_size.unwrap_or([1920, 1080]);
+                self.count_particles(w, h, density)
+            }
+            2 => {
+                let [w, h] = self.multimedia.last_source_size.unwrap_or([1280, 720]);
+                self.count_particles(w, h, density)
             }
             _ => 0,
         }
@@ -482,12 +480,6 @@ impl NebulaToolsApp {
                 );
             }
         });
-        // TODO: To be deleted.
-        ui.label(
-            egui::RichText::new(self.i18n.tr("video_note"))
-                .small()
-                .color(egui::Color32::YELLOW),
-        );
     }
 
     fn prepare_render_data_from_multimedia(&mut self, ctx: &egui::Context) -> Vec<f32> {
@@ -643,6 +635,7 @@ impl NebulaToolsApp {
                     if let Ok(loaded) = image::load_from_memory(&out.stdout) {
                         // Show source preview from first frame
                         let size = [loaded.width() as usize, loaded.height() as usize];
+                        self.multimedia.last_source_size = Some([loaded.width(), loaded.height()]);
                         let pixels = loaded.to_rgba8();
                         let color_img = egui::ColorImage::from_rgba_unmultiplied(
                             size,
@@ -767,11 +760,12 @@ impl NebulaToolsApp {
             let mut frames = Vec::with_capacity(total_frames);
             let mut runtime_particles = base_particles.clone();
 
+            let mut pex_ctx = crate::particleex::ExprContext::new();
+
             for f_idx in 0..total_frames {
                 let t = f_idx as f64 / self.multimedia.target_fps as f64;
 
                 for p in runtime_particles.iter_mut() {
-                    let mut pex_ctx = crate::particleex::ExprContext::new();
                     pex_ctx.set("t", crate::particleex::Value::Num(t));
                     pex_ctx.set("x", crate::particleex::Value::Num(p.pos[0] as f64));
                     pex_ctx.set("y", crate::particleex::Value::Num(p.pos[1] as f64));
@@ -1109,6 +1103,8 @@ impl NebulaToolsApp {
             use rand::Rng;
             let mut rng = rand::thread_rng();
 
+            let mut pex_ctx = crate::particleex::ExprContext::new();
+
             while stdout.read_exact(&mut buffer).is_ok() {
                 let mut frame_particles = Vec::new();
                 let mut pid: i32 = 0;
@@ -1144,7 +1140,6 @@ impl NebulaToolsApp {
                             let py = -(y as f32 + jy - cy) * particle_size;
 
                             // Run velocity_expr per particle, cr/cg/cb override video pixel
-                            let mut pex_ctx = crate::particleex::ExprContext::new();
                             pex_ctx.set("t", crate::particleex::Value::Num(t));
                             pex_ctx.set("x", crate::particleex::Value::Num(px as f64));
                             pex_ctx.set("y", crate::particleex::Value::Num(py as f64));

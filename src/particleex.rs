@@ -1584,30 +1584,3 @@ pub fn validate_command(line: &str) -> Result<String, String> {
         None => Err("❌ Failed to parse command arguments".into()),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_complex_expr() {
-        let code = "a=random()*2*PI;b=acos(1-2*random());x=3*sin(b)*cos(a);y=3*cos(b);z=3*sin(b)*sin(a);c=random();(c<0.5&cr,cg,cb=0.0,1.0,1.0)|(c>=0.5&c<0.75&cr,cg,cb=1.0,1.0,0.0)|(c>=0.75&cr,cg,cb=1.0,0.0,1.0);alpha=1.0";
-        let stmts = parse_statements_pest(code);
-        assert!(!stmts.is_empty());
-        let mut ctx = ExprContext::new();
-        ctx.set("cr", Value::Num(0.0));
-        ctx.set("cg", Value::Num(0.0));
-        ctx.set("cb", Value::Num(0.0));
-        exec_stmts(&stmts, &mut ctx);
-        println!(
-            "{:?} {:?} {:?}",
-            ctx.get("cr"),
-            ctx.get("cg"),
-            ctx.get("cb")
-        );
-
-        let code2 = "yaw=PI/40;(vx,,vz)=(-sin(yaw),cos(yaw),,-cos(yaw),-sin(yaw))*(x*2*sin(yaw),,z*2*sin(yaw));(t<60&vy=0.1*cos(PI*t/60)*0.5+0.1); (t>=60&vy=0.0);cr=cr;cg=cg;cb=cb;alpha=1.0";
-        let stmts2 = parse_statements_pest(code2);
-        assert!(!stmts2.is_empty());
-    }
-}

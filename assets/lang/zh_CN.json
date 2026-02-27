@@ -136,7 +136,6 @@
     "common_settings": "公共参数配置",
     "refresh_source": "刷新媒体源",
     "particle_volume_info": "粒子占位体积",
-    "video_note": "注：编译视频将使用流式写入，预览仅展示前几帧。",
     "kf_add": "添加关键帧",
     "kf_update": "更新关键帧",
     "kf_remove": "移除关键帧",

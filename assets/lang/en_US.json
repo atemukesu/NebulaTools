@@ -136,7 +136,6 @@
     "common_settings": "Common Parameters",
     "refresh_source": "Refresh Media Source",
     "particle_volume_info": "Particle Volumetric Estimate",
-    "video_note": "Note: Video compilation uses streaming. Preview only shows first few frames.",
     "kf_add": "Add KF",
     "kf_update": "Update KF",
     "kf_remove": "Remove KF",
