@@ -229,6 +229,7 @@ pub struct MultimediaState {
     pub particle_size: f32, // 粒子组成的整体空间尺寸 (原来的 particle_scale)
     pub point_size: f32,    // 粒子个体的大小 (Point Size)
     pub density: f32,
+    pub rotation: [f32; 3],
     pub status_msg: Option<String>,
     pub processing_progress: Option<f32>,
     pub is_processing: bool,
@@ -285,6 +286,7 @@ impl Default for MultimediaState {
             particle_size: 0.1,
             point_size: 0.05,
             density: 0.5,
+            rotation: [0.0, 0.0, 0.0],
             status_msg: None,
             processing_progress: None,
             is_processing: false,

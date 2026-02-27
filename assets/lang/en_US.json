@@ -256,5 +256,11 @@
     "cr_keyframe_del": "Remove Keyframe",
     "cr_compile": "Compile Preview",
     "cr_global_settings": "Global Settings",
-    "cr_duration": "Duration"
+    "cr_duration": "Duration",
+    "facing_z_pos": "Facing +Z",
+    "facing_z_neg": "Facing -Z",
+    "facing_y_pos": "Facing +Y",
+    "facing_y_neg": "Facing -Y",
+    "facing_x_pos": "Facing +X",
+    "facing_x_neg": "Facing -X"
 }

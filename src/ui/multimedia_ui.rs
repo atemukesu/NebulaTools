@@ -7,6 +7,32 @@ use std::io::Read;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 
+fn apply_euler_rotation(mut x: f32, mut y: f32, mut z: f32, rot: [f32; 3]) -> (f32, f32, f32) {
+    let (sx, cx) = rot[0].to_radians().sin_cos();
+    let (sy, cy) = rot[1].to_radians().sin_cos();
+    let (sz, cz) = rot[2].to_radians().sin_cos();
+
+    // Rx
+    let y1 = y * cx - z * sx;
+    let z1 = y * sx + z * cx;
+    y = y1;
+    z = z1;
+
+    // Ry
+    let x1 = x * cy + z * sy;
+    let z2 = -x * sy + z * cy;
+    x = x1;
+    z = z2;
+
+    // Rz
+    let x2 = x * cz - y * sz;
+    let y2 = x * sz + y * cz;
+    x = x2;
+    y = y2;
+
+    (x, y, z)
+}
+
 impl NebulaToolsApp {
     pub fn show_multimedia_workflow(&mut self, ctx: &egui::Context) {
         egui::SidePanel::left("multimedia_left_panel")
@@ -434,6 +460,54 @@ impl NebulaToolsApp {
             });
 
             ui.horizontal(|ui| {
+                ui.label(self.i18n.tr("cr_rotation"));
+                ui.add(egui::DragValue::new(&mut self.multimedia.rotation[0]).speed(1.0));
+                ui.add(egui::DragValue::new(&mut self.multimedia.rotation[1]).speed(1.0));
+                ui.add(egui::DragValue::new(&mut self.multimedia.rotation[2]).speed(1.0));
+
+                egui::ComboBox::from_id_source("mm_rot_preset")
+                    .selected_text(self.i18n.tr("preset"))
+                    .show_ui(ui, |ui| {
+                        if ui
+                            .selectable_label(false, self.i18n.tr("facing_z_pos"))
+                            .clicked()
+                        {
+                            self.multimedia.rotation = [0.0, 0.0, 0.0];
+                        }
+                        if ui
+                            .selectable_label(false, self.i18n.tr("facing_z_neg"))
+                            .clicked()
+                        {
+                            self.multimedia.rotation = [0.0, 180.0, 0.0];
+                        }
+                        if ui
+                            .selectable_label(false, self.i18n.tr("facing_x_pos"))
+                            .clicked()
+                        {
+                            self.multimedia.rotation = [0.0, -90.0, 0.0];
+                        }
+                        if ui
+                            .selectable_label(false, self.i18n.tr("facing_x_neg"))
+                            .clicked()
+                        {
+                            self.multimedia.rotation = [0.0, 90.0, 0.0];
+                        }
+                        if ui
+                            .selectable_label(false, self.i18n.tr("facing_y_pos"))
+                            .clicked()
+                        {
+                            self.multimedia.rotation = [-90.0, 0.0, 0.0];
+                        }
+                        if ui
+                            .selectable_label(false, self.i18n.tr("facing_y_neg"))
+                            .clicked()
+                        {
+                            self.multimedia.rotation = [90.0, 0.0, 0.0];
+                        }
+                    });
+            });
+
+            ui.horizontal(|ui| {
                 ui.label(self.i18n.tr("duration_s"));
                 ui.add(egui::DragValue::new(&mut self.multimedia.duration_secs).speed(0.1));
             });
@@ -735,9 +809,11 @@ impl NebulaToolsApp {
                         };
                         let px = (x as f32 + jx - cx) * dist_scale;
                         let py = -(y as f32 + jy - cy) * dist_scale;
+                        let (px, py, pz) =
+                            apply_euler_rotation(px, py, 0.0, self.multimedia.rotation);
                         base_particles.push(Particle {
                             id,
-                            pos: [px, py, 0.0],
+                            pos: [px, py, pz],
                             color: [pixel[0], pixel[1], pixel[2], pixel[3]],
                             size: self.multimedia.point_size,
                             tex_id: 0,
@@ -996,6 +1072,7 @@ impl NebulaToolsApp {
         let brightness_threshold = self.multimedia.brightness_threshold;
         let particle_size = self.multimedia.particle_size;
         let point_size = self.multimedia.point_size;
+        let rotation = self.multimedia.rotation;
         let velocity_expr = self.multimedia.velocity_expr.clone();
 
         // Shared state for thread communication
@@ -1103,91 +1180,106 @@ impl NebulaToolsApp {
             use rand::Rng;
             let mut rng = rand::thread_rng();
 
+            struct ScreenPixel {
+                idx: usize,
+                px: f32,
+                py: f32,
+                pz: f32,
+                id: i32,
+            }
+
+            let mut screen_pixels = Vec::new();
+            let mut fixed_pid: i32 = 0;
+            // Pre-calculate screen layout to ensure stable PIDs and positions across frames
+            for y in (0..height).step_by(step) {
+                for x in (0..width).step_by(step) {
+                    if density < 1.0 && rng.gen::<f32>() > density {
+                        continue;
+                    }
+                    let idx = ((y * width + x) * 3) as usize;
+                    for c in 0..copies_per_pixel {
+                        let jx = if c == 0 {
+                            0.0
+                        } else {
+                            rng.gen_range(-0.5..0.5)
+                        };
+                        let jy = if c == 0 {
+                            0.0
+                        } else {
+                            rng.gen_range(-0.5..0.5)
+                        };
+                        let px = (x as f32 + jx - cx) * particle_size;
+                        let py = -(y as f32 + jy - cy) * particle_size;
+                        let (px, py, pz) = apply_euler_rotation(px, py, 0.0, rotation);
+
+                        screen_pixels.push(ScreenPixel {
+                            idx,
+                            px,
+                            py,
+                            pz,
+                            id: fixed_pid,
+                        });
+                        fixed_pid += 1;
+                    }
+                }
+            }
+
             let mut pex_ctx = crate::particleex::ExprContext::new();
 
             while stdout.read_exact(&mut buffer).is_ok() {
-                let mut frame_particles = Vec::new();
-                let mut pid: i32 = 0;
+                let mut frame_particles = Vec::with_capacity(screen_pixels.len());
                 let t = frame_count as f64 / target_fps as f64;
 
-                for y in (0..height).step_by(step) {
-                    for x in (0..width).step_by(step) {
-                        let idx = ((y * width + x) * 3) as usize;
-                        let r = buffer[idx];
-                        let g = buffer[idx + 1];
-                        let b = buffer[idx + 2];
-                        let luma = (r as f32 * 0.299 + g as f32 * 0.587 + b as f32 * 0.114) / 255.0;
-                        if luma < brightness_threshold {
-                            continue;
-                        }
-
-                        if density < 1.0 && rng.gen::<f32>() > density {
-                            continue;
-                        }
-
-                        for c in 0..copies_per_pixel {
-                            let jx = if c == 0 {
-                                0.0
-                            } else {
-                                rng.gen_range(-0.5..0.5)
-                            };
-                            let jy = if c == 0 {
-                                0.0
-                            } else {
-                                rng.gen_range(-0.5..0.5)
-                            };
-                            let px = (x as f32 + jx - cx) * particle_size;
-                            let py = -(y as f32 + jy - cy) * particle_size;
-
-                            // Run velocity_expr per particle, cr/cg/cb override video pixel
-                            pex_ctx.set("t", crate::particleex::Value::Num(t));
-                            pex_ctx.set("x", crate::particleex::Value::Num(px as f64));
-                            pex_ctx.set("y", crate::particleex::Value::Num(py as f64));
-                            pex_ctx.set("z", crate::particleex::Value::Num(0.0));
-                            pex_ctx.set("cr", crate::particleex::Value::Num(r as f64 / 255.0));
-                            pex_ctx.set("cg", crate::particleex::Value::Num(g as f64 / 255.0));
-                            pex_ctx.set("cb", crate::particleex::Value::Num(b as f64 / 255.0));
-                            pex_ctx.set("alpha", crate::particleex::Value::Num(1.0));
-                            pex_ctx.set("mpsize", crate::particleex::Value::Num(point_size as f64));
-                            pex_ctx.set("vx", crate::particleex::Value::Num(0.0));
-                            pex_ctx.set("vy", crate::particleex::Value::Num(0.0));
-                            pex_ctx.set("vz", crate::particleex::Value::Num(0.0));
-                            pex_ctx.set("destroy", crate::particleex::Value::Num(0.0));
-                            pex_ctx.set("id", crate::particleex::Value::Num(pid as f64));
-
-                            if let Some(ref s) = stmts {
-                                crate::particleex::exec_stmts(s, &mut pex_ctx);
-                            }
-
-                            if pex_ctx.get("destroy").as_num() >= 1.0 {
-                                pid += 1;
-                                continue; // skip destroyed particles
-                            }
-
-                            let final_x = px + pex_ctx.get("vx").as_num() as f32;
-                            let final_y = py + pex_ctx.get("vy").as_num() as f32;
-                            let final_z = pex_ctx.get("vz").as_num() as f32;
-                            let final_r =
-                                (pex_ctx.get("cr").as_num().clamp(0.0, 1.0) * 255.0) as u8;
-                            let final_g =
-                                (pex_ctx.get("cg").as_num().clamp(0.0, 1.0) * 255.0) as u8;
-                            let final_b =
-                                (pex_ctx.get("cb").as_num().clamp(0.0, 1.0) * 255.0) as u8;
-                            let final_a =
-                                (pex_ctx.get("alpha").as_num().clamp(0.0, 1.0) * 255.0) as u8;
-                            let final_size = pex_ctx.get("mpsize").as_num() as f32;
-
-                            frame_particles.push(Particle {
-                                id: pid,
-                                pos: [final_x, final_y, final_z],
-                                color: [final_r, final_g, final_b, final_a],
-                                size: final_size,
-                                tex_id: 0,
-                                seq_index: 0,
-                            });
-                            pid += 1;
-                        }
+                for sp in &screen_pixels {
+                    let r = buffer[sp.idx];
+                    let g = buffer[sp.idx + 1];
+                    let b = buffer[sp.idx + 2];
+                    let luma = (r as f32 * 0.299 + g as f32 * 0.587 + b as f32 * 0.114) / 255.0;
+                    if luma < brightness_threshold {
+                        continue;
                     }
+
+                    // Run velocity_expr per particle, cr/cg/cb override video pixel
+                    pex_ctx.set("t", crate::particleex::Value::Num(t));
+                    pex_ctx.set("x", crate::particleex::Value::Num(sp.px as f64));
+                    pex_ctx.set("y", crate::particleex::Value::Num(sp.py as f64));
+                    pex_ctx.set("z", crate::particleex::Value::Num(sp.pz as f64));
+                    pex_ctx.set("cr", crate::particleex::Value::Num(r as f64 / 255.0));
+                    pex_ctx.set("cg", crate::particleex::Value::Num(g as f64 / 255.0));
+                    pex_ctx.set("cb", crate::particleex::Value::Num(b as f64 / 255.0));
+                    pex_ctx.set("alpha", crate::particleex::Value::Num(1.0));
+                    pex_ctx.set("mpsize", crate::particleex::Value::Num(point_size as f64));
+                    pex_ctx.set("vx", crate::particleex::Value::Num(0.0));
+                    pex_ctx.set("vy", crate::particleex::Value::Num(0.0));
+                    pex_ctx.set("vz", crate::particleex::Value::Num(0.0));
+                    pex_ctx.set("destroy", crate::particleex::Value::Num(0.0));
+                    pex_ctx.set("id", crate::particleex::Value::Num(sp.id as f64));
+
+                    if let Some(ref s) = stmts {
+                        crate::particleex::exec_stmts(s, &mut pex_ctx);
+                    }
+
+                    if pex_ctx.get("destroy").as_num() >= 1.0 {
+                        continue; // skip destroyed particles
+                    }
+
+                    let final_x = sp.px + pex_ctx.get("vx").as_num() as f32;
+                    let final_y = sp.py + pex_ctx.get("vy").as_num() as f32;
+                    let final_z = pex_ctx.get("vz").as_num() as f32;
+                    let final_r = (pex_ctx.get("cr").as_num().clamp(0.0, 1.0) * 255.0) as u8;
+                    let final_g = (pex_ctx.get("cg").as_num().clamp(0.0, 1.0) * 255.0) as u8;
+                    let final_b = (pex_ctx.get("cb").as_num().clamp(0.0, 1.0) * 255.0) as u8;
+                    let final_a = (pex_ctx.get("alpha").as_num().clamp(0.0, 1.0) * 255.0) as u8;
+                    let final_size = pex_ctx.get("mpsize").as_num() as f32;
+
+                    frame_particles.push(Particle {
+                        id: sp.id,
+                        pos: [final_x, final_y, final_z],
+                        color: [final_r, final_g, final_b, final_a],
+                        size: final_size,
+                        tex_id: 0,
+                        seq_index: 0,
+                    });
                 }
                 frames.push(frame_particles);
                 frame_count += 1;
