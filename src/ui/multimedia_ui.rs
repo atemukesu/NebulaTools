@@ -759,13 +759,7 @@ impl NebulaToolsApp {
             let density = self.multimedia.density.max(0.000001);
 
             let mut id: i32 = 0;
-            let step = if mode == 0 {
-                1u32
-            } else if density < 1.0 {
-                (1.0 / density).ceil() as u32
-            } else {
-                1u32
-            };
+
             let copies_per_pixel = if density >= 1.0 {
                 density.floor() as u32
             } else {
@@ -774,8 +768,8 @@ impl NebulaToolsApp {
             use rand::Rng;
             let mut rng = rand::thread_rng();
 
-            for y in (0..height).step_by(step as usize) {
-                for x in (0..width).step_by(step as usize) {
+            for y in 0..height {
+                for x in 0..width {
                     let pixel = img.get_pixel(x, y);
 
                     let is_filtered = if mode == 0 {
@@ -1163,12 +1157,6 @@ impl NebulaToolsApp {
 
             let cx = width as f32 / 2.0;
             let cy = height as f32 / 2.0;
-
-            let step = if density < 1.0 {
-                (1.0 / density).ceil() as usize
-            } else {
-                1usize
-            };
             let copies_per_pixel = if density >= 1.0 {
                 density.floor() as u32
             } else {
@@ -1191,8 +1179,8 @@ impl NebulaToolsApp {
             let mut screen_pixels = Vec::new();
             let mut fixed_pid: i32 = 0;
             // Pre-calculate screen layout to ensure stable PIDs and positions across frames
-            for y in (0..height).step_by(step) {
-                for x in (0..width).step_by(step) {
+            for y in 0..height {
+                for x in 0..width {
                     if density < 1.0 && rng.gen::<f32>() > density {
                         continue;
                     }
@@ -1265,7 +1253,7 @@ impl NebulaToolsApp {
 
                     let final_x = sp.px + pex_ctx.get("vx").as_num() as f32;
                     let final_y = sp.py + pex_ctx.get("vy").as_num() as f32;
-                    let final_z = pex_ctx.get("vz").as_num() as f32;
+                    let final_z = sp.pz + pex_ctx.get("vz").as_num() as f32;
                     let final_r = (pex_ctx.get("cr").as_num().clamp(0.0, 1.0) * 255.0) as u8;
                     let final_g = (pex_ctx.get("cg").as_num().clamp(0.0, 1.0) * 255.0) as u8;
                     let final_b = (pex_ctx.get("cb").as_num().clamp(0.0, 1.0) * 255.0) as u8;
