@@ -605,6 +605,8 @@ impl NebulaToolsApp {
         };
 
         let mut frames: Vec<Vec<Particle>> = Vec::with_capacity(total_frames as usize);
+        // Store base particles (without trails) separately to prevent recursive explosion
+        let mut base_frames: Vec<Vec<Particle>> = Vec::with_capacity(total_frames as usize);
 
         for f in 0..total_frames {
             let mut particles = Vec::with_capacity(count as usize * 2);
@@ -815,7 +817,10 @@ impl NebulaToolsApp {
                 }
             }
 
-            // ── Add Trail Particles (from previous frames) ──
+            // Save base particles (without trails) for trail sourcing
+            base_frames.push(particles.clone());
+
+            // ── Add Trail Particles (from previous frames' BASE particles only) ──
             if trail_enabled && trail_frames > 0 && f > 0 {
                 let start = if f > trail_frames {
                     f - trail_frames
@@ -827,8 +832,8 @@ impl NebulaToolsApp {
                     let alpha_factor = (1.0 - age) * trail_opacity;
                     let dt_trail = (f - tf) as f32 / target_fps as f32;
 
-                    if let Some(prev_frame) = frames.get(tf as usize) {
-                        for pp in prev_frame.iter() {
+                    if let Some(prev_base) = base_frames.get(tf as usize) {
+                        for pp in prev_base.iter() {
                             // Only include a subset of trail particles across frames
                             // to avoid O(n*k) explosion
                             if pp.id % (trail_frames as i32).max(1) != 0 {
