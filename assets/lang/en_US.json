@@ -171,5 +171,14 @@
     "cr_trail_enabled": "Enable Trail",
     "cr_trail_gravity": "Gravity",
     "cr_trail_duration": "Trail Duration (s)",
-    "cr_trail_opacity": "Trail Opacity"
+    "cr_trail_opacity": "Trail Opacity",
+    "cr_flap_mode": "Flap Mode",
+    "cr_flap_continuous": "Continuous",
+    "cr_flap_schedule": "Schedule",
+    "cr_flap_schedule_desc": "Import a flap schedule from a text file. One time point (in seconds) per line. The butterfly will only flap its wings at these time points.",
+    "cr_flap_import": "Import Schedule",
+    "cr_flap_valid_fmt": "File format valid, recognized",
+    "cr_flap_time_points": "time points",
+    "cr_flap_empty_file": "File is empty, no time points found",
+    "cr_flap_invalid_fmt": "Invalid file format: each line should be a number (time in seconds)"
 }

@@ -171,5 +171,14 @@
     "cr_trail_enabled": "启用拖影",
     "cr_trail_gravity": "重力",
     "cr_trail_duration": "拖影持续时间 (秒)",
-    "cr_trail_opacity": "拖影不透明度"
+    "cr_trail_opacity": "拖影不透明度",
+    "cr_flap_mode": "振翅模式",
+    "cr_flap_continuous": "连续",
+    "cr_flap_schedule": "时间表",
+    "cr_flap_schedule_desc": "从文本文件导入振翅时间表。每行一个时间点（秒），蝴蝶将仅在这些时间点扇动翅膀。",
+    "cr_flap_import": "导入时间表",
+    "cr_flap_valid_fmt": "文件格式正确，识别到",
+    "cr_flap_time_points": "个时间点",
+    "cr_flap_empty_file": "文件为空，未找到任何时间点",
+    "cr_flap_invalid_fmt": "文件格式错误：每行应为一个数字（时间，单位秒）"
 }

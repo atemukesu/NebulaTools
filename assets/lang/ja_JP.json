@@ -171,5 +171,14 @@
     "cr_trail_enabled": "残像を有効にする",
     "cr_trail_gravity": "重力",
     "cr_trail_duration": "残像の持続時間 (秒)",
-    "cr_trail_opacity": "残像の不透明度"
+    "cr_trail_opacity": "残像の不透明度",
+    "cr_flap_mode": "羽ばたきモード",
+    "cr_flap_continuous": "連続",
+    "cr_flap_schedule": "タイムテーブル",
+    "cr_flap_schedule_desc": "テキストファイルから羽ばたきスケジュールをインポートします。1行に1つの時間点（秒単位）を記載してください。蝶はこれらの時間点でのみ羽ばたきます。",
+    "cr_flap_import": "スケジュールをインポート",
+    "cr_flap_valid_fmt": "ファイル形式は正しいです。認識された",
+    "cr_flap_time_points": "個のタイムポイント",
+    "cr_flap_empty_file": "ファイルが空です。タイムポイントが見つかりません",
+    "cr_flap_invalid_fmt": "ファイル形式が無効です：各行は数値（秒単位の時間）である必要があります"
 }

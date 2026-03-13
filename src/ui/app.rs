@@ -386,6 +386,12 @@ pub struct CreatorState {
     pub preview_playing: bool,
     pub preview_frame_idx: i32,
     pub preview_timer: f32,
+    // Flap mode: 0 = continuous (speed-based), 1 = schedule (imported time points)
+    pub flap_mode: u8,
+    #[serde(skip)]
+    pub flap_schedule: Vec<f32>,
+    #[serde(skip)]
+    pub flap_schedule_status: Option<String>,
 }
 
 impl Default for CreatorState {
@@ -414,6 +420,9 @@ impl Default for CreatorState {
             preview_playing: false,
             preview_frame_idx: 0,
             preview_timer: 0.0,
+            flap_mode: 0,
+            flap_schedule: Vec::new(),
+            flap_schedule_status: None,
         }
     }
 }

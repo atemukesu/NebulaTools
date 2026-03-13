@@ -75,13 +75,105 @@ impl NebulaToolsApp {
                                         )
                                         .text(self.i18n.tr("count")),
                                     );
-                                    ui.add(
-                                        egui::Slider::new(
-                                            &mut self.creator.butterfly_speed,
-                                            0.1..=5.0,
-                                        )
-                                        .text(self.i18n.tr("flutter_speed")),
-                                    );
+                                    ui.horizontal(|ui: &mut egui::Ui| {
+                                        ui.label(self.i18n.tr("cr_flap_mode"));
+                                        ui.radio_value(
+                                            &mut self.creator.flap_mode,
+                                            0,
+                                            self.i18n.tr("cr_flap_continuous"),
+                                        );
+                                        ui.radio_value(
+                                            &mut self.creator.flap_mode,
+                                            1,
+                                            self.i18n.tr("cr_flap_schedule"),
+                                        );
+                                    });
+
+                                    if self.creator.flap_mode == 0 {
+                                        ui.add(
+                                            egui::Slider::new(
+                                                &mut self.creator.butterfly_speed,
+                                                0.1..=5.0,
+                                            )
+                                            .text(self.i18n.tr("flutter_speed")),
+                                        );
+                                    } else {
+                                        // Schedule mode
+                                        ui.small(self.i18n.tr("cr_flap_schedule_desc"));
+                                        ui.add_space(4.0);
+                                        if ui
+                                            .button(format!(
+                                                "📂 {}",
+                                                self.i18n.tr("cr_flap_import")
+                                            ))
+                                            .clicked()
+                                        {
+                                            if let Some(path) = rfd::FileDialog::new()
+                                                .add_filter("Text", &["txt"])
+                                                .pick_file()
+                                            {
+                                                match std::fs::read_to_string(&path) {
+                                                    Ok(content) => {
+                                                        let mut times: Vec<f32> = Vec::new();
+                                                        let mut valid = true;
+                                                        for line in content.lines() {
+                                                            let trimmed = line.trim();
+                                                            if trimmed.is_empty() {
+                                                                continue;
+                                                            }
+                                                            match trimmed.parse::<f32>() {
+                                                                Ok(v) => times.push(v),
+                                                                Err(_) => {
+                                                                    valid = false;
+                                                                    break;
+                                                                }
+                                                            }
+                                                        }
+                                                        if valid && !times.is_empty() {
+                                                            let count = times.len();
+                                                            times.sort_by(|a, b| {
+                                                                a.partial_cmp(b).unwrap()
+                                                            });
+                                                            self.creator.flap_schedule = times;
+                                                            self.creator.flap_schedule_status =
+                                                                Some(format!(
+                                                                    "✅ {} {} {}",
+                                                                    self.i18n
+                                                                        .tr("cr_flap_valid_fmt"),
+                                                                    count,
+                                                                    self.i18n
+                                                                        .tr("cr_flap_time_points")
+                                                                ));
+                                                        } else if times.is_empty() && valid {
+                                                            self.creator.flap_schedule_status =
+                                                                Some(format!(
+                                                                    "⚠ {}",
+                                                                    self.i18n
+                                                                        .tr("cr_flap_empty_file")
+                                                                ));
+                                                        } else {
+                                                            self.creator.flap_schedule_status =
+                                                                Some(format!(
+                                                                    "❌ {}",
+                                                                    self.i18n
+                                                                        .tr("cr_flap_invalid_fmt")
+                                                                ));
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        self.creator.flap_schedule_status =
+                                                            Some(format!("❌ {}", e));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if let Some(status) =
+                                            &self.creator.flap_schedule_status
+                                        {
+                                            ui.add_space(2.0);
+                                            ui.label(status.as_str());
+                                        }
+                                    }
                                     ui.add(
                                         egui::Slider::new(
                                             &mut self.creator.butterfly_size,
@@ -517,7 +609,36 @@ impl NebulaToolsApp {
         for f in 0..total_frames {
             let mut particles = Vec::with_capacity(count as usize * 2);
             let time = f as f32 / target_fps as f32;
-            let flutter_t = time * self.creator.butterfly_speed * 10.0;
+
+            // Compute flap factor based on mode
+            let flutter_t = if self.creator.flap_mode == 0 {
+                // Continuous mode: original speed-based flutter
+                time * self.creator.butterfly_speed * 10.0
+            } else {
+                // Schedule mode: flap at imported time points
+                // Find the nearest scheduled time and compute a smooth pulse
+                let schedule = &self.creator.flap_schedule;
+                if schedule.is_empty() {
+                    0.0 // No schedule loaded, wings stay flat
+                } else {
+                    // half-width of each flap pulse (seconds)
+                    let pulse_half = 0.15;
+                    let mut flap_val = 0.0f32;
+                    for &st in schedule.iter() {
+                        let dt = (time - st).abs();
+                        if dt < pulse_half {
+                            // Smooth cosine bell pulse
+                            let t_norm = dt / pulse_half;
+                            let pulse = 0.5 * (1.0 + (t_norm * std::f32::consts::PI).cos());
+                            flap_val = flap_val.max(pulse);
+                        }
+                    }
+                    // Map flap_val [0,1] to a sin-like oscillation for wing displacement
+                    // When flap_val=1 (at schedule time), wings are fully up;
+                    // when 0, wings are flat
+                    flap_val * std::f32::consts::FRAC_PI_2
+                }
+            };
             let mut pid: i32 = 0;
 
             // ── Upper Wing (Fay's butterfly curve, main lobes) ──
