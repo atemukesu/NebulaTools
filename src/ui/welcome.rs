@@ -34,7 +34,7 @@ impl NebulaToolsApp {
                 );
                 ui.add_space(40.0);
                 ui.horizontal(|ui| {
-                    let total_width = 640.0;
+                    let total_width = 860.0;
                     ui.add_space((ui.available_width() - total_width) / 2.0);
                     let btn_size = egui::vec2(200.0, 60.0);
                     if ui
@@ -86,6 +86,23 @@ impl NebulaToolsApp {
                         .clicked()
                     {
                         self.mode = AppMode::Multimedia;
+                    }
+                    ui.add_space(20.0);
+                    if ui
+                        .add_sized(
+                            btn_size,
+                            egui::Button::new(
+                                egui::RichText::new(format!(
+                                    "✨ {}",
+                                    self.i18n.tr("creator_btn")
+                                ))
+                                .size(20.0),
+                            )
+                            .rounding(8.0),
+                        )
+                        .clicked()
+                    {
+                        self.mode = AppMode::Creator;
                     }
                 });
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {

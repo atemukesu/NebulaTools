@@ -15,6 +15,7 @@ pub enum AppMode {
     Preview,
     Particleex,
     Multimedia,
+    Creator,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -350,6 +351,73 @@ impl Default for ParticleexState {
     }
 }
 
+#[derive(PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
+pub enum CreatorPreset {
+    Butterfly,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct CreatorState {
+    pub selected_preset: CreatorPreset,
+    pub butterfly_count: u32,
+    pub butterfly_speed: f32,
+    pub butterfly_size: f32,
+    // Per-part colors
+    pub color_upper_wing: [f32; 3],
+    pub color_lower_wing: [f32; 3],
+    pub color_body: [f32; 3],
+    pub color_antennae: [f32; 3],
+    pub color_wing_edge: [f32; 3],
+    pub point_size: f32,
+    // Rotation / orientation
+    pub rotation: [f32; 3],
+    // Trail settings
+    pub trail_enabled: bool,
+    pub trail_gravity: [f32; 3],
+    pub trail_duration: f32,
+    pub trail_opacity: f32,
+    // Velocity expression
+    pub velocity_expr: String,
+    pub target_fps: u16,
+    pub duration_secs: f32,
+    pub status_msg: Option<String>,
+    #[serde(skip)]
+    pub preview_frames: Option<Vec<Vec<Particle>>>,
+    pub preview_playing: bool,
+    pub preview_frame_idx: i32,
+    pub preview_timer: f32,
+}
+
+impl Default for CreatorState {
+    fn default() -> Self {
+        Self {
+            selected_preset: CreatorPreset::Butterfly,
+            butterfly_count: 800,
+            butterfly_speed: 1.0,
+            butterfly_size: 0.1,
+            color_upper_wing: [0.85, 0.35, 0.95],
+            color_lower_wing: [0.55, 0.15, 0.85],
+            color_body: [0.2, 0.1, 0.15],
+            color_antennae: [0.3, 0.2, 0.25],
+            color_wing_edge: [1.0, 0.7, 0.95],
+            point_size: 0.1,
+            rotation: [-90.0, 0.0, 0.0],
+            trail_enabled: false,
+            trail_gravity: [0.0, -0.5, 0.0],
+            trail_duration: 0.5,
+            trail_opacity: 0.5,
+            velocity_expr: "vx=0; vy=0; vz=0".to_string(),
+            target_fps: 30,
+            duration_secs: 5.0,
+            status_msg: None,
+            preview_frames: None,
+            preview_playing: false,
+            preview_frame_idx: 0,
+            preview_timer: 0.0,
+        }
+    }
+}
+
 pub struct NebulaToolsApp {
     pub player: PlayerState,
     pub config: AppConfig,
@@ -366,6 +434,7 @@ pub struct NebulaToolsApp {
     pub edit: EditState,
     pub pex: ParticleexState,
     pub multimedia: MultimediaState,
+    pub creator: CreatorState,
 }
 
 impl NebulaToolsApp {
@@ -395,6 +464,7 @@ impl NebulaToolsApp {
             edit: EditState::default(),
             pex: ParticleexState::default(),
             multimedia: MultimediaState::default(),
+            creator: CreatorState::default(),
         }
     }
 
@@ -444,7 +514,7 @@ impl NebulaToolsApp {
 
     pub fn handle_import(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
-            .add_filter("Nebula", &["nbl"])
+            .add_filter("Nebula", &["nbl"][..])
             .pick_file()
         {
             match self.player.load_file(path) {
@@ -570,6 +640,7 @@ impl eframe::App for NebulaToolsApp {
         if self.player.header.is_none()
             && self.mode != AppMode::Particleex
             && self.mode != AppMode::Multimedia
+            && self.mode != AppMode::Creator
         {
             self.show_welcome_screen(ctx);
             return;
@@ -609,6 +680,11 @@ impl eframe::App for NebulaToolsApp {
                             self.export_multimedia_nbl(ctx);
                             ui.close_menu();
                         }
+                    } else if self.mode == AppMode::Creator {
+                        if ui.button(self.i18n.tr("export_nbl")).clicked() {
+                            self.export_creator_nbl();
+                            ui.close_menu();
+                        }
                     } else if self.mode == AppMode::Particleex {
                         if ui.button(self.i18n.tr("export_nbl")).clicked() {
                             self.export_particleex_nbl();
@@ -641,10 +717,10 @@ impl eframe::App for NebulaToolsApp {
 
                 // 1. Back to Home button (if in a tool mode and no file is being edited)
                 if self.player.header.is_none()
-                    && (self.mode == AppMode::Particleex || self.mode == AppMode::Multimedia)
+                    && (self.mode == AppMode::Particleex || self.mode == AppMode::Multimedia || self.mode == AppMode::Creator)
                 {
                     if ui.button(format!("🏠 {}", self.i18n.tr("home"))).clicked() {
-                        self.mode = AppMode::Edit; // This will trigger welcome screen
+                        self.mode = AppMode::Preview; // Preview mode with no header = Welcome Screen
                     }
                     ui.separator();
                 }
@@ -668,6 +744,11 @@ impl eframe::App for NebulaToolsApp {
                         egui::RichText::new(format!("📺 {}", self.i18n.tr("multimedia_mode")))
                             .strong(),
                     );
+                } else if self.mode == AppMode::Creator {
+                    ui.label(
+                        egui::RichText::new(format!("✨ {}", self.i18n.tr("creator_mode")))
+                            .strong(),
+                    );
                 }
             });
         });
@@ -677,6 +758,7 @@ impl eframe::App for NebulaToolsApp {
             AppMode::Edit => self.show_edit_workflow(ctx),
             AppMode::Particleex => self.show_particleex_workflow(ctx),
             AppMode::Multimedia => self.show_multimedia_workflow(ctx),
+            AppMode::Creator => self.show_creator_workflow(ctx),
         }
     }
 
