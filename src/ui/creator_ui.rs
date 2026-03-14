@@ -870,7 +870,19 @@ impl NebulaToolsApp {
                 .set_file_name("butterfly_preset.nbl")
                 .save_file()
             {
-                let (bbox_min, bbox_max) = recalculate_bbox(frames);
+                let (mut bbox_min, mut bbox_max) = recalculate_bbox(frames);
+
+                // Ensure a minimum AABB size to prevent culling by downstream renderers
+                let min_half_extent = 1.0f32; // minimum ±1.0 on each axis
+                for i in 0..3 {
+                    let center = (bbox_min[i] + bbox_max[i]) * 0.5;
+                    let half = (bbox_max[i] - bbox_min[i]) * 0.5;
+                    if half < min_half_extent {
+                        bbox_min[i] = center - min_half_extent;
+                        bbox_max[i] = center + min_half_extent;
+                    }
+                }
+
                 let header = NblHeader {
                     version: 1,
                     target_fps: self.creator.target_fps,
