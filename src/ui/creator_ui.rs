@@ -71,7 +71,7 @@ impl NebulaToolsApp {
                                     ui.add(
                                         egui::Slider::new(
                                             &mut self.creator.butterfly_count,
-                                            100..=5000,
+                                            100..=50000,
                                         )
                                         .text(self.i18n.tr("count")),
                                     );
@@ -451,11 +451,11 @@ impl NebulaToolsApp {
                         ui.group(|ui: &mut egui::Ui| {
                             ui.label(self.i18n.tr("duration"));
                             ui.add(
-                                egui::Slider::new(&mut self.creator.duration_secs, 1.0..=30.0)
+                                egui::Slider::new(&mut self.creator.duration_secs, 1.0..=600.0)
                                     .text(self.i18n.tr("duration_s")),
                             );
                             ui.add(
-                                egui::Slider::new(&mut self.creator.target_fps, 10..=60)
+                                egui::Slider::new(&mut self.creator.target_fps, 1..=120)
                                     .text(self.i18n.tr("fps")),
                             );
                         });
@@ -613,32 +613,42 @@ impl NebulaToolsApp {
             let time = f as f32 / target_fps as f32;
 
             // Compute flap factor based on mode
+            // flutter_t is a continuous phase value fed into sin() for wing oscillation
             let flutter_t = if self.creator.flap_mode == 0 {
                 // Continuous mode: original speed-based flutter
                 time * self.creator.butterfly_speed * 10.0
             } else {
-                // Schedule mode: flap at imported time points
-                // Find the nearest scheduled time and compute a smooth pulse
+                // Schedule mode: flap with a burst of wing beats at each time point
                 let schedule = &self.creator.flap_schedule;
                 if schedule.is_empty() {
                     0.0 // No schedule loaded, wings stay flat
                 } else {
-                    // half-width of each flap pulse (seconds)
-                    let pulse_half = 0.15;
-                    let mut flap_val = 0.0f32;
+                    // Envelope half-width (seconds): how long each flap burst lasts
+                    let burst_half = 0.3f32;
+                    // Number of wing beats per burst
+                    let flap_freq = 8.0f32; // beats/sec within the burst
+
+                    let mut amplitude = 0.0f32;
+                    let mut phase = 0.0f32;
+
                     for &st in schedule.iter() {
-                        let dt = (time - st).abs();
-                        if dt < pulse_half {
-                            // Smooth cosine bell pulse
-                            let t_norm = dt / pulse_half;
-                            let pulse = 0.5 * (1.0 + (t_norm * std::f32::consts::PI).cos());
-                            flap_val = flap_val.max(pulse);
+                        let dt = time - st; // signed: negative = before event
+                        if dt.abs() < burst_half {
+                            // Smooth cosine envelope [0..1]
+                            let t_norm = dt.abs() / burst_half;
+                            let env = 0.5 * (1.0 + (t_norm * std::f32::consts::PI).cos());
+                            if env > amplitude {
+                                amplitude = env;
+                                // Phase: oscillate fast within the burst window
+                                // dt goes from -burst_half..+burst_half
+                                // we want a sin that starts at 0 at the start of burst
+                                phase = (dt + burst_half) * flap_freq * std::f32::consts::TAU;
+                            }
                         }
                     }
-                    // Map flap_val [0,1] to a sin-like oscillation for wing displacement
-                    // When flap_val=1 (at schedule time), wings are fully up;
-                    // when 0, wings are flat
-                    flap_val * std::f32::consts::FRAC_PI_2
+                    // Return phase scaled by amplitude: when amplitude=0 wings are flat,
+                    // when amplitude=1 wings oscillate at full swing
+                    phase * amplitude
                 }
             };
             let mut pid: i32 = 0;
