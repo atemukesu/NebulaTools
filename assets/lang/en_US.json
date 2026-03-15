@@ -180,5 +180,7 @@
     "cr_flap_valid_fmt": "File format valid, recognized",
     "cr_flap_time_points": "time points",
     "cr_flap_empty_file": "File is empty, no time points found",
-    "cr_flap_invalid_fmt": "Invalid file format: each line should be a number (time in seconds)"
+    "cr_flap_invalid_fmt": "Invalid file format: each line should be a number (time in seconds)",
+    "sponsor": "Sponsor",
+    "sponsor_desc": "If you find this tool helpful, please consider supporting the development."
 }

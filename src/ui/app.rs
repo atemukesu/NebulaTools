@@ -759,6 +759,12 @@ impl eframe::App for NebulaToolsApp {
                             .strong(),
                     );
                 }
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.add(egui::Button::new(egui::RichText::new("💖").size(16.0)).frame(false)).on_hover_text(self.i18n.tr("sponsor")).clicked() {
+                        ui.ctx().output_mut(|o| o.open_url = Some(egui::output::OpenUrl::new_tab("https://afdian.com/a/atommix")));
+                    }
+                });
             });
         });
 

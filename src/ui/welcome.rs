@@ -111,6 +111,30 @@ impl NebulaToolsApp {
                         egui::Color32::GRAY,
                         format!("{}: Atemukesu", self.i18n.tr("author")),
                     );
+
+                    ui.add_space(20.0);
+
+                    // Sponsorship Section
+                    ui.horizontal(|ui| {
+                        let sponsor_desc = self.i18n.tr("sponsor_desc");
+                        let sponsor_text = self.i18n.tr("sponsor");
+                        
+                        ui.spacing_mut().item_spacing.x = 10.0;
+                        
+                        // Centering
+                        let total_width = 460.0; 
+                        ui.add_space((ui.available_width() - total_width).max(0.0) / 2.0);
+                        
+                        ui.label(egui::RichText::new("💖").size(18.0));
+                        ui.label(egui::RichText::new(sponsor_desc).size(14.0).color(egui::Color32::from_gray(180)));
+                        
+                        if ui.add(egui::Button::new(egui::RichText::new(sponsor_text).strong())
+                            .rounding(8.0))
+                            .clicked() 
+                        {
+                            ui.ctx().output_mut(|o| o.open_url = Some(egui::output::OpenUrl::new_tab("https://afdian.com/a/atommix")));
+                        }
+                    });
                 });
             });
         });

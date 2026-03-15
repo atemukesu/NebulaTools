@@ -180,5 +180,7 @@
     "cr_flap_valid_fmt": "文件格式正确，识别到",
     "cr_flap_time_points": "个时间点",
     "cr_flap_empty_file": "文件为空，未找到任何时间点",
-    "cr_flap_invalid_fmt": "文件格式错误：每行应为一个数字（时间，单位秒）"
+    "cr_flap_invalid_fmt": "文件格式错误：每行应为一个数字（时间，单位秒）",
+    "sponsor": "赞助",
+    "sponsor_desc": "如果您觉得这个工具有所帮助，欢迎支持后续开发。"
 }
