@@ -603,54 +603,77 @@ impl NebulaToolsApp {
         } else {
             0
         };
-
+        
+        // Pre-compute trigger frame indices for schedule mode
+        let trigger_frames: std::collections::HashSet<u32> = if self.creator.flap_mode == 1 
+            && !self.creator.flap_schedule.is_empty() 
+        {
+            self.creator.flap_schedule
+                .iter()
+                .filter_map(|&st| {
+                    let frame = (st * target_fps as f32).round() as i32;
+                    if frame >= 0 && frame < total_frames as i32 {
+                        Some(frame as u32)
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        } else {
+            std::collections::HashSet::new()
+        };
+        
+        let base_speed = self.creator.butterfly_speed * 10.0;  // Base flapping speed
+        let decay_rate = 5.0;                                 // Decay constant
+        let min_amplitude = 0.05;                              // Minimum amplitude (ensures subtle movement)
+        
         let mut frames: Vec<Vec<Particle>> = Vec::with_capacity(total_frames as usize);
         // Store base particles (without trails) separately to prevent recursive explosion
         let mut base_frames: Vec<Vec<Particle>> = Vec::with_capacity(total_frames as usize);
-
+        
+        // Phase accumulator for smooth integration 
+        let mut current_phase = 0.0f32;
+        let mut current_amplitude = 0.0f32;
+        let mut last_time = 0.0f32;
+        
         for f in 0..total_frames {
             let mut particles = Vec::with_capacity(count as usize * 2);
             let time = f as f32 / target_fps as f32;
-
-            // Compute flap factor based on mode
-            // flutter_t is a continuous phase value fed into sin() for wing oscillation
-            let flutter_t = if self.creator.flap_mode == 0 {
-                // Continuous mode: original speed-based flutter
-                time * self.creator.butterfly_speed * 10.0
-            } else {
-                // Schedule mode: flap with a burst of wing beats at each time point
-                let schedule = &self.creator.flap_schedule;
-                if schedule.is_empty() {
-                    0.0 // No schedule loaded, wings stay flat
-                } else {
-                    // Envelope half-width (seconds): how long each flap burst lasts
-                    let burst_half = 0.3f32;
-                    // Number of wing beats per burst
-                    let flap_freq = 8.0f32; // beats/sec within the burst
-
-                    let mut amplitude = 0.0f32;
-                    let mut phase = 0.0f32;
-
-                    for &st in schedule.iter() {
-                        let dt = time - st; // signed: negative = before event
-                        if dt.abs() < burst_half {
-                            // Smooth cosine envelope [0..1]
-                            let t_norm = dt.abs() / burst_half;
-                            let env = 0.5 * (1.0 + (t_norm * std::f32::consts::PI).cos());
-                            if env > amplitude {
-                                amplitude = env;
-                                // Phase: oscillate fast within the burst window
-                                // dt goes from -burst_half..+burst_half
-                                // we want a sin that starts at 0 at the start of burst
-                                phase = (dt + burst_half) * flap_freq * std::f32::consts::TAU;
-                            }
-                        }
-                    }
-                    // Return phase scaled by amplitude: when amplitude=0 wings are flat,
-                    // when amplitude=1 wings oscillate at full swing
-                    phase * amplitude
+            let dt = if f == 0 { 0.0 } else { time - last_time };
+        
+            // ---- Amplitude update (schedule mode only) ----
+            if self.creator.flap_mode == 1 {
+                // Exponential decay
+                current_amplitude *= (-decay_rate * dt).exp();
+                // Ensure minimum amplitude to avoid complete stillness
+                current_amplitude = current_amplitude.max(min_amplitude);
+                // Trigger frame: boost amplitude with smooth interpolation
+                if trigger_frames.contains(&f) {
+                    let target_amplitude = (current_amplitude + 0.8).min(1.0);
+                    // Use 0.2 interpolation factor for smooth easing, avoiding sudden jumps
+                    current_amplitude = current_amplitude * 0.8 + target_amplitude * 0.2;
                 }
+            }
+        
+            // ---- Compute effective speed and active amplitude ----
+            let (effective_speed, active_amplitude) = if self.creator.flap_mode == 0 {
+                // Continuous mode: constant speed, full amplitude
+                (base_speed, 1.0)
+            } else {
+                // Schedule mode: speed proportional to current amplitude
+                (base_speed * current_amplitude * 2.5, current_amplitude)
             };
+        
+            // Update phase
+            current_phase += effective_speed * dt;
+            let flutter_t = current_phase;
+        
+            // Record current frame time for next iteration
+            last_time = time;
+        
+            // Define "rest pose" when butterfly is completely still (0.0 = flat, 0.3 = nice V-shape)
+            let rest_pose = 0.3f32;
+            
             let mut pid: i32 = 0;
 
             // ── Upper Wing (Fay's butterfly curve, main lobes) ──
@@ -670,8 +693,10 @@ impl NebulaToolsApp {
                 x *= self.creator.butterfly_size * 2.0;
                 y *= self.creator.butterfly_size * 2.0;
 
-                // 3D flapping
-                let flap = (flutter_t + (x.abs() * 0.5)).sin();
+                // 3D flapping with amplitude blending
+                let raw_flap = (flutter_t + (x.abs() * 0.5)).sin();
+                // Smooth transition: rest_pose when inactive, raw_flap when active
+                let flap = rest_pose * (1.0 - active_amplitude) + raw_flap * active_amplitude;
                 let z = x.abs() * flap * 0.8;
 
                 let (rx, ry, rz) = apply_euler_rotation(x, y, z, rotation);
@@ -700,7 +725,9 @@ impl NebulaToolsApp {
                 let x = t_val.sin() * petal * self.creator.butterfly_size * 1.2;
                 let y = t_val.cos() * petal * self.creator.butterfly_size * 1.2;
 
-                let flap = (flutter_t + (x.abs() * 0.5)).sin();
+                // 3D flapping with amplitude blending
+                let raw_flap = (flutter_t + (x.abs() * 0.5)).sin();
+                let flap = rest_pose * (1.0 - active_amplitude) + raw_flap * active_amplitude;
                 let z = x.abs() * flap * 0.6;
 
                 let (rx, ry, rz) = apply_euler_rotation(x, y, z, rotation);
@@ -728,7 +755,9 @@ impl NebulaToolsApp {
                 let x = t_val.sin() * petal * scale;
                 let y = t_val.cos() * petal * scale;
 
-                let flap = (flutter_t + (x.abs() * 0.5)).sin();
+                // 3D flapping with amplitude blending
+                let raw_flap = (flutter_t + (x.abs() * 0.5)).sin();
+                let flap = rest_pose * (1.0 - active_amplitude) + raw_flap * active_amplitude;
                 let z = x.abs() * flap * 0.85;
 
                 let (rx, ry, rz) = apply_euler_rotation(x, y, z, rotation);
@@ -821,9 +850,10 @@ impl NebulaToolsApp {
                     let vy = pex_ctx.get("vy").as_num() as f32;
                     let vz = pex_ctx.get("vz").as_num() as f32;
 
-                    p.pos[0] += vx * time;
-                    p.pos[1] += vy * time;
-                    p.pos[2] += vz * time;
+                    // Use frame step dt instead of total time for stable displacement
+                    p.pos[0] += vx * dt;
+                    p.pos[1] += vy * dt;
+                    p.pos[2] += vz * dt;
                 }
             }
 
@@ -837,16 +867,22 @@ impl NebulaToolsApp {
                 } else {
                     0
                 };
+                
+                // Trail particle sampling rate (30% of particles generate trails, configurable)
+                let trail_sample_rate = 0.3f32;
+                
                 for tf in start..f {
                     let age = (f - tf) as f32 / trail_frames as f32;
                     let alpha_factor = (1.0 - age) * trail_opacity;
                     let dt_trail = (f - tf) as f32 / target_fps as f32;
 
                     if let Some(prev_base) = base_frames.get(tf as usize) {
+                        use rand::Rng;
+                        let mut rng = rand::thread_rng();
+                        
                         for pp in prev_base.iter() {
-                            // Only include a subset of trail particles across frames
-                            // to avoid O(n*k) explosion
-                            if pp.id % (trail_frames as i32).max(1) != 0 {
+                            // Use probabilistic sampling instead of modulo to avoid regular patterns
+                            if rng.gen::<f32>() > trail_sample_rate {
                                 continue;
                             }
                             let mut tp = pp.clone();
