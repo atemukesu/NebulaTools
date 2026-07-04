@@ -308,6 +308,8 @@ pub struct PexCommandEntry {
     pub position: [f32; 3],
     pub duration_override: f32, // 0 = use command's own lifespan
     pub enabled: bool,
+    pub textures: Vec<String>,
+    pub texture_interval: u32,
 }
 
 impl Default for PexCommandEntry {
@@ -318,6 +320,17 @@ impl Default for PexCommandEntry {
             position: [0.0, 0.0, 0.0],
             duration_override: 0.0,
             enabled: true,
+            textures: vec![
+                "minecraft:textures/particle/glitter_0.png".to_string(),
+                "minecraft:textures/particle/glitter_1.png".to_string(),
+                "minecraft:textures/particle/glitter_2.png".to_string(),
+                "minecraft:textures/particle/glitter_3.png".to_string(),
+                "minecraft:textures/particle/glitter_4.png".to_string(),
+                "minecraft:textures/particle/glitter_5.png".to_string(),
+                "minecraft:textures/particle/glitter_6.png".to_string(),
+                "minecraft:textures/particle/glitter_7.png".to_string(),
+            ],
+            texture_interval: 20,
         }
     }
 }
@@ -333,6 +346,7 @@ pub struct ParticleexState {
     pub show_help: bool,
     pub fullscreen_entry: Option<usize>,
     pub confirm_delete: Option<usize>,
+    pub preview_textures: Option<Vec<String>>,
 }
 impl Default for ParticleexState {
     fn default() -> Self {
@@ -347,6 +361,7 @@ impl Default for ParticleexState {
             show_help: false,
             fullscreen_entry: None,
             confirm_delete: None,
+            preview_textures: None,
         }
     }
 }

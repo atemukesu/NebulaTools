@@ -2,3 +2,6 @@ config.json
 target
 dist
 *.zip
+
+# TRAE
+.trae

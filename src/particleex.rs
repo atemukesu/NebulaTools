@@ -1039,6 +1039,8 @@ struct Keyframe {
     b: u8,
     a: u8,
     size: f64,
+    tex_id: u8,
+    seq_index: u8,
 }
 
 struct Track {
@@ -1048,10 +1050,25 @@ struct Track {
 
 // ─────────────────────── Track Generation ───────────────────────
 
-fn generate_tracks(cmd: &ParsedCommand, start_id: i32) -> (Vec<Track>, i32) {
+fn generate_tracks(
+    cmd: &ParsedCommand,
+    start_id: i32,
+    global_tex_ids: &[u8],
+    texture_interval: u32,
+) -> (Vec<Track>, i32) {
     let mut tracks = Vec::new();
     let mut current_id = start_id;
     let mut rng = rand::thread_rng();
+
+    let get_tex_id = |f: u32| -> u8 {
+        if global_tex_ids.is_empty() {
+            0
+        } else {
+            let frame_interval = (texture_interval as f64 * TIME_SCALE).max(1.0);
+            let idx = ((f as f64) / frame_interval).floor() as usize % global_tex_ids.len();
+            global_tex_ids[idx]
+        }
+    };
 
     // ─── Conditional mode: 3D range-based generation ───
     if cmd.config.is_conditional {
@@ -1154,6 +1171,8 @@ fn generate_tracks(cmd: &ParsedCommand, start_id: i32) -> (Vec<Track>, i32) {
                                 b: (cb_val * 255.0).clamp(0.0, 255.0) as u8,
                                 a: (ca_val * 255.0).clamp(0.0, 255.0) as u8,
                                 size: sctx.get("mpsize").as_num(),
+                                tex_id: get_tex_id(f),
+                                seq_index: 0,
                             });
 
                             cur_x += cur_vx / TIME_SCALE;
@@ -1266,6 +1285,8 @@ fn generate_tracks(cmd: &ParsedCommand, start_id: i32) -> (Vec<Track>, i32) {
                     b: (cb_val * 255.0).clamp(0.0, 255.0) as u8,
                     a: (ca_val * 255.0).clamp(0.0, 255.0) as u8,
                     size: ctx.get("mpsize").as_num(),
+                    tex_id: get_tex_id(f),
+                    seq_index: 0,
                 });
 
                 cur_x += cur_vx / TIME_SCALE;
@@ -1391,6 +1412,8 @@ fn generate_tracks(cmd: &ParsedCommand, start_id: i32) -> (Vec<Track>, i32) {
                 b: (cb_val * 255.0).clamp(0.0, 255.0) as u8,
                 a: (ca_val * 255.0).clamp(0.0, 255.0) as u8,
                 size: ctx.get("mpsize").as_num(),
+                tex_id: get_tex_id(f),
+                seq_index: 0,
             });
 
             cur_x += cur_vx / TIME_SCALE;
@@ -1439,8 +1462,8 @@ fn tracks_to_frames(tracks: &[Track]) -> Vec<Vec<Particle>> {
                     pos: [k.x as f32, k.y as f32, k.z as f32],
                     color: [k.r, k.g, k.b, k.a],
                     size: k.size as f32,
-                    tex_id: 0,
-                    seq_index: 0,
+                    tex_id: k.tex_id,
+                    seq_index: k.seq_index,
                 });
             }
         }
@@ -1460,8 +1483,10 @@ pub fn compile(commands_text: &str) -> Result<(Vec<Vec<Particle>>, u16), String>
         start_tick: 0.0,
         position: [0.0; 3],
         duration_override: 0.0,
+        textures: vec![],
+        texture_interval: 20,
     }];
-    compile_entries(&entries)
+    compile_entries(&entries).map(|(f, fps, _)| (f, fps))
 }
 
 /// A single compilable entry with optional overrides.
@@ -1470,15 +1495,28 @@ pub struct CompileEntry {
     pub start_tick: f64,
     pub position: [f64; 3],
     pub duration_override: f64, // 0 = use command's own value
+    pub textures: Vec<String>,
+    pub texture_interval: u32,
 }
 
 /// Compile multiple entries into merged frame snapshots.
 /// Each entry can have its own start time, position, and duration override.
-/// Returns (frames, target_fps).
-pub fn compile_entries(entries: &[CompileEntry]) -> Result<(Vec<Vec<Particle>>, u16), String> {
+/// Returns (frames, target_fps, global_textures).
+pub fn compile_entries(
+    entries: &[CompileEntry],
+) -> Result<(Vec<Vec<Particle>>, u16, Vec<String>), String> {
     let mut all_tracks: Vec<Track> = Vec::new();
     let mut p_id: i32 = 0;
     let mut errors = Vec::new();
+
+    let mut global_textures: Vec<String> = Vec::new();
+    for entry in entries {
+        for tex in &entry.textures {
+            if !global_textures.contains(tex) {
+                global_textures.push(tex.clone());
+            }
+        }
+    }
 
     for entry in entries {
         let lines: Vec<&str> = entry
@@ -1486,6 +1524,17 @@ pub fn compile_entries(entries: &[CompileEntry]) -> Result<(Vec<Vec<Particle>>, 
             .lines()
             .map(|l| l.trim())
             .filter(|l| !l.is_empty())
+            .collect();
+
+        let entry_global_ids: Vec<u8> = entry
+            .textures
+            .iter()
+            .map(|tex| {
+                global_textures
+                    .iter()
+                    .position(|g| g == tex)
+                    .unwrap_or(0) as u8
+            })
             .collect();
 
         for line in &lines {
@@ -1499,18 +1548,20 @@ pub fn compile_entries(entries: &[CompileEntry]) -> Result<(Vec<Vec<Particle>>, 
             }
             match parse_command(line) {
                 Some(mut cmd) => {
-                    // Apply position override
                     if entry.position != [0.0; 3] {
                         cmd.center = entry.position;
                     }
-                    // Apply duration override
                     if entry.duration_override > 0.0 {
                         cmd.lifespan = entry.duration_override as u32;
                     }
 
-                    let (mut tracks, next_id) = generate_tracks(&cmd, p_id);
+                    let (mut tracks, next_id) = generate_tracks(
+                        &cmd,
+                        p_id,
+                        &entry_global_ids,
+                        entry.texture_interval,
+                    );
 
-                    // Apply start tick offset
                     let offset = (entry.start_tick * TIME_SCALE).floor() as u32;
                     if offset > 0 {
                         for track in &mut tracks {
@@ -1539,7 +1590,7 @@ pub fn compile_entries(entries: &[CompileEntry]) -> Result<(Vec<Vec<Particle>>, 
     }
 
     let frames = tracks_to_frames(&all_tracks);
-    Ok((frames, 60))
+    Ok((frames, 60, global_textures))
 }
 
 /// Validate a command line. Returns Ok(description) or Err(error message).

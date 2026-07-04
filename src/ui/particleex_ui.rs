@@ -310,6 +310,75 @@ impl NebulaToolsApp {
                                         );
                                         ui.end_row();
                                     });
+
+                                // Texture animation
+                                ui.add_space(6.0);
+                                ui.separator();
+                                ui.add_space(4.0);
+
+                                egui::CollapsingHeader::new("🎨 纹理动画 (Texture Animation)")
+                                    .default_open(false)
+                                    .show(ui, |ui| {
+                                        ui.horizontal(|ui| {
+                                            ui.label("变换间隔 (Ticks):");
+                                            ui.add(
+                                                egui::DragValue::new(
+                                                    &mut self.pex.entries[i].texture_interval,
+                                                )
+                                                .speed(1.0)
+                                                .clamp_range(1..=1000)
+                                                .suffix(" tick"),
+                                            );
+                                        });
+
+                                        ui.add_space(4.0);
+                                        ui.label("纹理序列列表:");
+
+                                        let mut to_remove = None;
+                                        let tex_len = self.pex.entries[i].textures.len();
+
+                                        egui::Frame::none()
+                                            .fill(ui.visuals().faint_bg_color)
+                                            .inner_margin(4.0)
+                                            .show(ui, |ui| {
+                                                for t_idx in 0..tex_len {
+                                                    ui.horizontal(|ui| {
+                                                        ui.label(format!("[{}]", t_idx));
+                                                        ui.text_edit_singleline(
+                                                            &mut self.pex.entries[i].textures[t_idx],
+                                                        );
+                                                        if ui.button("❌").clicked() {
+                                                            to_remove = Some(t_idx);
+                                                        }
+                                                    });
+                                                }
+                                            });
+
+                                        if let Some(rem_idx) = to_remove {
+                                            self.pex.entries[i].textures.remove(rem_idx);
+                                        }
+
+                                        ui.horizontal(|ui| {
+                                            if ui.button("➕ 添加纹理").clicked() {
+                                                self.pex.entries[i]
+                                                    .textures
+                                                    .push("minecraft:textures/particle/glitter_0.png".to_string());
+                                            }
+                                            if ui.button("🔄 重置默认 (glitter 0-7)").clicked() {
+                                                self.pex.entries[i].textures = vec![
+                                                    "minecraft:textures/particle/glitter_0.png".to_string(),
+                                                    "minecraft:textures/particle/glitter_1.png".to_string(),
+                                                    "minecraft:textures/particle/glitter_2.png".to_string(),
+                                                    "minecraft:textures/particle/glitter_3.png".to_string(),
+                                                    "minecraft:textures/particle/glitter_4.png".to_string(),
+                                                    "minecraft:textures/particle/glitter_5.png".to_string(),
+                                                    "minecraft:textures/particle/glitter_6.png".to_string(),
+                                                    "minecraft:textures/particle/glitter_7.png".to_string(),
+                                                ];
+                                                self.pex.entries[i].texture_interval = 20;
+                                            }
+                                        });
+                                    });
                             });
                     }
 
@@ -526,6 +595,8 @@ impl NebulaToolsApp {
                     e.position[2] as f64,
                 ],
                 duration_override: e.duration_override as f64,
+                textures: e.textures.clone(),
+                texture_interval: e.texture_interval,
             })
             .collect();
 
@@ -535,13 +606,14 @@ impl NebulaToolsApp {
         }
 
         match particleex::compile_entries(&entries) {
-            Ok((frames, fps)) => {
+            Ok((frames, fps, textures)) => {
                 let frame_count = frames.len();
                 let duration = frame_count as f64 / fps as f64;
                 self.pex.preview_frames = Some(frames);
                 self.pex.preview_fps = fps;
                 self.pex.preview_frame_idx = 0;
                 self.pex.preview_playing = true;
+                self.pex.preview_textures = Some(textures);
                 self.pex.status_msg = Some(format!(
                     "✅ {} {} {} ({:.1}s)",
                     self.i18n.tr("particleex_compiled"),
@@ -569,17 +641,26 @@ impl NebulaToolsApp {
             }
         };
 
+        let raw_textures = self.pex.preview_textures.clone().unwrap_or_default();
+        let textures: Vec<TextureEntry> = raw_textures
+            .into_iter()
+            .map(|path| TextureEntry {
+                path,
+                rows: 1,
+                cols: 1,
+            })
+            .collect();
+
         let (bbox_min, bbox_max) = player::recalculate_bbox(&frames);
         let header = NblHeader {
             version: 1,
             target_fps: self.pex.preview_fps,
             total_frames: frames.len() as u32,
-            texture_count: 0,
+            texture_count: textures.len() as u16,
             attributes: 0x03,
             bbox_min,
             bbox_max,
         };
-        let textures: Vec<TextureEntry> = vec![];
 
         if let Some(path) = rfd::FileDialog::new()
             .add_filter("Nebula", &["nbl"])
