@@ -121,10 +121,8 @@ impl NebulaToolsApp {
                                             .strong(),
                                         );
                                         ui.label(
-                                            egui::RichText::new(
-                                                self.i18n.tr("pex_help_example_val"),
-                                            )
-                                            .monospace(),
+                                            egui::RichText::new(self.i18n.tr("pex_help_example_val"))
+                                                .monospace(),
                                         );
                                         ui.end_row();
                                     });

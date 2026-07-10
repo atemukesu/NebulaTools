@@ -1,11 +1,15 @@
 use crate::player::{NblHeader, Particle};
-use crate::ui::app::{build_texture_entries, NebulaToolsApp};
+use crate::ui::app::{
+    build_texture_entries, MultimediaThreadProgress, MultimediaThreadStatus, NebulaToolsApp,
+};
 use ab_glyph::{Font, PxScale, ScaleFont};
 use eframe::egui;
 use image::{DynamicImage, GenericImageView};
 use std::io::Read;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
+
+const HIGH_PARTICLE_WARNING_THRESHOLD: usize = 100_000;
 
 fn apply_euler_rotation(mut x: f32, mut y: f32, mut z: f32, rot: [f32; 3]) -> (f32, f32, f32) {
     let (sx, cx) = rot[0].to_radians().sin_cos();
@@ -31,6 +35,251 @@ fn apply_euler_rotation(mut x: f32, mut y: f32, mut z: f32, rot: [f32; 3]) -> (f
     y = y2;
 
     (x, y, z)
+}
+
+struct VideoProbeInfo {
+    width: u32,
+    height: u32,
+    duration: f32,
+}
+
+struct ScreenPixel {
+    idx: usize,
+    px: f32,
+    py: f32,
+    pz: f32,
+    id: i32,
+    ox: f32,
+    oy: f32,
+    oz: f32,
+}
+
+struct VideoParticleGenerator {
+    screen_pixels: Vec<ScreenPixel>,
+    pex_ctx: crate::particleex::ExprContext,
+    stmts: Option<Vec<crate::particleex::Stmt>>,
+    brightness_threshold: f32,
+    point_size: f32,
+    target_fps: u16,
+    frame_count: usize,
+}
+
+impl VideoParticleGenerator {
+    fn new(
+        width: u32,
+        height: u32,
+        target_fps: u16,
+        density: f32,
+        brightness_threshold: f32,
+        particle_size: f32,
+        point_size: f32,
+        rotation: [f32; 3],
+        velocity_expr: &str,
+        start_frame: u32,
+    ) -> Self {
+        let cx = width as f32 / 2.0;
+        let cy = height as f32 / 2.0;
+        let copies_per_pixel = if density >= 1.0 {
+            density.floor() as u32
+        } else {
+            1u32
+        };
+
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        let mut screen_pixels = Vec::new();
+        let mut fixed_pid: i32 = 0;
+
+        for y in 0..height {
+            for x in 0..width {
+                if density < 1.0 && rng.gen::<f32>() > density {
+                    continue;
+                }
+                let idx = ((y * width + x) * 3) as usize;
+                for c in 0..copies_per_pixel {
+                    let jx = if c == 0 {
+                        0.0
+                    } else {
+                        rng.gen_range(-0.5..0.5)
+                    };
+                    let jy = if c == 0 {
+                        0.0
+                    } else {
+                        rng.gen_range(-0.5..0.5)
+                    };
+                    let px = (x as f32 + jx - cx) * particle_size;
+                    let py = -(y as f32 + jy - cy) * particle_size;
+                    let (px, py, pz) = apply_euler_rotation(px, py, 0.0, rotation);
+
+                    screen_pixels.push(ScreenPixel {
+                        idx,
+                        px,
+                        py,
+                        pz,
+                        id: fixed_pid,
+                        ox: 0.0,
+                        oy: 0.0,
+                        oz: 0.0,
+                    });
+                    fixed_pid += 1;
+                }
+            }
+        }
+
+        Self {
+            screen_pixels,
+            pex_ctx: crate::particleex::ExprContext::new(),
+            stmts: crate::particleex::compile_expr(velocity_expr),
+            brightness_threshold,
+            point_size,
+            target_fps,
+            frame_count: start_frame as usize,
+        }
+    }
+
+    fn next_frame(&mut self, buffer: &[u8]) -> Vec<Particle> {
+        let mut frame_particles = Vec::with_capacity(self.screen_pixels.len());
+        let t = self.frame_count as f64 / self.target_fps as f64;
+
+        for sp in &mut self.screen_pixels {
+            let r = buffer[sp.idx];
+            let g = buffer[sp.idx + 1];
+            let b = buffer[sp.idx + 2];
+            let luma = (r as f32 * 0.299 + g as f32 * 0.587 + b as f32 * 0.114) / 255.0;
+            if luma < self.brightness_threshold {
+                continue;
+            }
+
+            self.pex_ctx.set("t", crate::particleex::Value::Num(t));
+            self.pex_ctx
+                .set("x", crate::particleex::Value::Num((sp.px + sp.ox) as f64));
+            self.pex_ctx
+                .set("y", crate::particleex::Value::Num((sp.py + sp.oy) as f64));
+            self.pex_ctx
+                .set("z", crate::particleex::Value::Num((sp.pz + sp.oz) as f64));
+            self.pex_ctx
+                .set("cr", crate::particleex::Value::Num(r as f64 / 255.0));
+            self.pex_ctx
+                .set("cg", crate::particleex::Value::Num(g as f64 / 255.0));
+            self.pex_ctx
+                .set("cb", crate::particleex::Value::Num(b as f64 / 255.0));
+            self.pex_ctx
+                .set("alpha", crate::particleex::Value::Num(1.0));
+            self.pex_ctx.set(
+                "mpsize",
+                crate::particleex::Value::Num(self.point_size as f64),
+            );
+            self.pex_ctx.set("vx", crate::particleex::Value::Num(0.0));
+            self.pex_ctx.set("vy", crate::particleex::Value::Num(0.0));
+            self.pex_ctx.set("vz", crate::particleex::Value::Num(0.0));
+            self.pex_ctx
+                .set("destroy", crate::particleex::Value::Num(0.0));
+            self.pex_ctx
+                .set("id", crate::particleex::Value::Num(sp.id as f64));
+
+            if let Some(ref s) = self.stmts {
+                crate::particleex::exec_stmts(s, &mut self.pex_ctx);
+            }
+
+            sp.ox += self.pex_ctx.get("vx").as_num() as f32;
+            sp.oy += self.pex_ctx.get("vy").as_num() as f32;
+            sp.oz += self.pex_ctx.get("vz").as_num() as f32;
+
+            if self.pex_ctx.get("destroy").as_num() >= 1.0 {
+                continue;
+            }
+
+            let final_r = (self.pex_ctx.get("cr").as_num().clamp(0.0, 1.0) * 255.0) as u8;
+            let final_g = (self.pex_ctx.get("cg").as_num().clamp(0.0, 1.0) * 255.0) as u8;
+            let final_b = (self.pex_ctx.get("cb").as_num().clamp(0.0, 1.0) * 255.0) as u8;
+            let final_a = (self.pex_ctx.get("alpha").as_num().clamp(0.0, 1.0) * 255.0) as u8;
+            let final_size = self.pex_ctx.get("mpsize").as_num() as f32;
+
+            frame_particles.push(Particle {
+                id: sp.id,
+                pos: [sp.px + sp.ox, sp.py + sp.oy, sp.pz + sp.oz],
+                color: [final_r, final_g, final_b, final_a],
+                size: final_size,
+                tex_id: 0,
+                seq_index: 0,
+            });
+        }
+
+        self.frame_count += 1;
+        frame_particles
+    }
+}
+
+fn probe_video_info(media_path: &str) -> anyhow::Result<VideoProbeInfo> {
+    let probe = Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height,duration",
+            "-of",
+            "csv=p=0",
+            media_path,
+        ])
+        .output()
+        .map_err(|e| anyhow::anyhow!("Failed to run ffprobe: {}", e))?;
+
+    if !probe.status.success() {
+        let stderr = String::from_utf8_lossy(&probe.stderr);
+        return Err(anyhow::anyhow!(
+            "ffprobe failed with status {}: {}",
+            probe.status,
+            stderr.trim()
+        ));
+    }
+
+    let stdout = String::from_utf8_lossy(&probe.stdout);
+    let parts: Vec<&str> = stdout.trim().split(',').collect();
+    if parts.len() < 3 {
+        return Err(anyhow::anyhow!(
+            "ffprobe returned unexpected stream info: {}",
+            stdout.trim()
+        ));
+    }
+
+    let width = parts[0]
+        .parse::<u32>()
+        .map_err(|e| anyhow::anyhow!("Invalid ffprobe width '{}': {}", parts[0], e))?;
+    let height = parts[1]
+        .parse::<u32>()
+        .map_err(|e| anyhow::anyhow!("Invalid ffprobe height '{}': {}", parts[1], e))?;
+    let duration = parts[2]
+        .parse::<f32>()
+        .map_err(|e| anyhow::anyhow!("Invalid ffprobe duration '{}': {}", parts[2], e))?;
+
+    Ok(VideoProbeInfo {
+        width,
+        height,
+        duration,
+    })
+}
+
+fn split_frame_ranges(total_frames: u32, chunk_count: usize) -> Vec<(u32, u32)> {
+    if total_frames == 0 || chunk_count == 0 {
+        return Vec::new();
+    }
+
+    let chunk_count = chunk_count.min(total_frames as usize).max(1);
+    let base = total_frames / chunk_count as u32;
+    let remainder = total_frames % chunk_count as u32;
+    let mut start = 0u32;
+    let mut ranges = Vec::with_capacity(chunk_count);
+
+    for idx in 0..chunk_count {
+        let len = base + if idx < remainder as usize { 1 } else { 0 };
+        let end = start + len;
+        ranges.push((start, end));
+        start = end;
+    }
+
+    ranges
 }
 
 impl NebulaToolsApp {
@@ -166,12 +415,29 @@ impl NebulaToolsApp {
                         });
 
                         ui.add_space(8.0);
-                        let est_count = self.estimate_multimedia_particles();
-                        ui.label(format!(
-                            "{}: {}",
-                            self.i18n.tr("estimated_count"),
-                            est_count
-                        ));
+                        match self.multimedia.mode {
+                            2 if self.multimedia.last_source_size.is_none() => {
+                                ui.label(format!(
+                                    "{}: {}",
+                                    self.i18n.tr("estimated_count"),
+                                    self.i18n.tr("select_video_for_estimate")
+                                ));
+                            }
+                            _ => {
+                                let est_count = self.estimate_multimedia_particles();
+                                ui.label(format!(
+                                    "{}: {}",
+                                    self.i18n.tr("estimated_count"),
+                                    est_count
+                                ));
+                                if est_count >= HIGH_PARTICLE_WARNING_THRESHOLD {
+                                    ui.colored_label(
+                                        egui::Color32::from_rgb(255, 80, 80),
+                                        self.i18n.tr("high_particle_count_warning"),
+                                    );
+                                }
+                            }
+                        }
                         ui.add_space(8.0);
 
                         ui.horizontal(|ui| {
@@ -260,11 +526,19 @@ impl NebulaToolsApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             if self.multimedia.is_processing {
                 // Poll shared state from video compile thread
-                if let Some((ref progress_arc, ref status_arc, ref done_arc, ref frames_arc)) =
-                    self.multimedia.video_compile_shared
+                if let Some((
+                    ref progress_arc,
+                    ref status_arc,
+                    ref done_arc,
+                    ref frames_arc,
+                    ref thread_arc,
+                )) = self.multimedia.video_compile_shared
                 {
                     if let Ok(pct) = progress_arc.lock() {
                         self.multimedia.processing_progress = Some(*pct);
+                    }
+                    if let Ok(thread_progress) = thread_arc.lock() {
+                        self.multimedia.thread_progress = thread_progress.clone();
                     }
                     let is_done = done_arc.lock().map(|d| *d).unwrap_or(false);
                     if is_done {
@@ -286,6 +560,7 @@ impl NebulaToolsApp {
                                 self.multimedia.preview_frame_idx = 0;
                             }
                         }
+                        self.multimedia.thread_progress.clear();
                         self.multimedia.video_compile_shared = None;
                     } else {
                         ctx.request_repaint();
@@ -308,6 +583,39 @@ impl NebulaToolsApp {
                                     .show_percentage()
                                     .desired_width(300.0),
                             );
+                        }
+                        if !self.multimedia.thread_progress.is_empty() {
+                            ui.add_space(12.0);
+                            ui.group(|ui| {
+                                ui.label(
+                                    egui::RichText::new(self.i18n.tr("export_thread_status"))
+                                        .strong(),
+                                );
+                                for (idx, thread) in
+                                    self.multimedia.thread_progress.iter().enumerate()
+                                {
+                                    let total =
+                                        thread.end_frame.saturating_sub(thread.start_frame).max(1);
+                                    let done = thread
+                                        .current_frame
+                                        .saturating_sub(thread.start_frame)
+                                        .min(total);
+                                    let pct = done as f32 / total as f32;
+                                    ui.label(format!(
+                                        "{} {} [{}..{}) - {}",
+                                        self.i18n.tr("export_thread"),
+                                        idx + 1,
+                                        thread.start_frame,
+                                        thread.end_frame,
+                                        self.describe_thread_status(thread.status)
+                                    ));
+                                    ui.add(
+                                        egui::ProgressBar::new(pct)
+                                            .desired_width(280.0)
+                                            .text(format!("{}/{}", done, total)),
+                                    );
+                                }
+                            });
                         }
                     });
                 });
@@ -553,6 +861,15 @@ impl NebulaToolsApp {
                     .pick_file()
                 {
                     self.multimedia.media_path = Some(path.to_string_lossy().to_string());
+                    self.multimedia.last_source_size = None;
+                    match probe_video_info(&path.to_string_lossy()) {
+                        Ok(info) => {
+                            self.multimedia.last_source_size = Some([info.width, info.height]);
+                        }
+                        Err(e) => {
+                            self.multimedia.status_msg = Some(format!("Video probe failed: {}", e));
+                        }
+                    }
                 }
             }
             if let Some(path) = &self.multimedia.media_path {
@@ -564,6 +881,27 @@ impl NebulaToolsApp {
                 );
             }
         });
+
+        ui.horizontal(|ui| {
+            ui.label(self.i18n.tr("export_threads"));
+            ui.add(
+                egui::DragValue::new(&mut self.multimedia.export_threads)
+                    .clamp_range(1..=64)
+                    .speed(1.0),
+            );
+        });
+        ui.small(self.i18n.tr("export_threads_hint"));
+    }
+
+    fn describe_thread_status(&self, status: MultimediaThreadStatus) -> &'static str {
+        match status {
+            MultimediaThreadStatus::Waiting => self.i18n.tr("export_status_waiting"),
+            MultimediaThreadStatus::Decoding => self.i18n.tr("export_status_decoding"),
+            MultimediaThreadStatus::Generating => self.i18n.tr("export_status_generating"),
+            MultimediaThreadStatus::Encoded => self.i18n.tr("export_status_encoded"),
+            MultimediaThreadStatus::Merging => self.i18n.tr("export_status_merging"),
+            MultimediaThreadStatus::Done => self.i18n.tr("export_status_done"),
+        }
     }
 
     fn prepare_render_data_from_multimedia(&mut self, ctx: &egui::Context) -> Vec<f32> {
@@ -1036,12 +1374,17 @@ impl NebulaToolsApp {
         }
     }
 
-    pub fn export_multimedia_nbl(&mut self, _ctx: &egui::Context) {
-        if let Some(frames) = &self.multimedia.preview_frames {
-            if let Some(path) = rfd::FileDialog::new()
-                .add_filter("Nebula", &["nbl"])
-                .save_file()
-            {
+    pub fn export_multimedia_nbl(&mut self, ctx: &egui::Context) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("Nebula", &["nbl"])
+            .save_file()
+        {
+            if self.multimedia.mode == 2 {
+                self.export_video_nbl_streaming(ctx, path);
+                return;
+            }
+
+            if let Some(frames) = &self.multimedia.preview_frames {
                 let (bbox_min, bbox_max) = crate::player::recalculate_bbox(frames);
                 let textures = build_texture_entries(&self.multimedia.texture_animation.textures);
                 let header = NblHeader {
@@ -1058,10 +1401,284 @@ impl NebulaToolsApp {
                     Ok(_) => self.multimedia.status_msg = Some("Export success!".into()),
                     Err(e) => self.multimedia.status_msg = Some(format!("Export failed: {}", e)),
                 }
+            } else {
+                self.multimedia.status_msg =
+                    Some("No compiled preview. Please compile first.".into());
             }
-        } else {
-            self.multimedia.status_msg = Some("No compiled preview. Please compile first.".into());
         }
+    }
+
+    fn export_video_nbl_streaming(&mut self, ctx: &egui::Context, path: std::path::PathBuf) {
+        let media_path = match &self.multimedia.media_path {
+            Some(p) => p.clone(),
+            None => {
+                self.multimedia.status_msg = Some("No Video selected".into());
+                return;
+            }
+        };
+
+        self.multimedia.is_processing = true;
+        self.multimedia.status_msg = Some("Exporting video to NBL...".into());
+        self.multimedia.processing_progress = Some(0.0);
+        self.multimedia.thread_progress.clear();
+
+        let target_fps = self.multimedia.target_fps;
+        let density = self.multimedia.density.max(0.000001);
+        let brightness_threshold = self.multimedia.brightness_threshold;
+        let particle_size = self.multimedia.particle_size;
+        let point_size = self.multimedia.point_size;
+        let rotation = self.multimedia.rotation;
+        let velocity_expr = self.multimedia.velocity_expr.clone();
+        let export_threads = self.multimedia.export_threads.max(1);
+
+        let shared_progress = Arc::new(Mutex::new(0.0f32));
+        let shared_status = Arc::new(Mutex::new(None::<String>));
+        let shared_done = Arc::new(Mutex::new(false));
+        let shared_frames = Arc::new(Mutex::new(None::<Vec<Vec<Particle>>>));
+        let shared_threads = Arc::new(Mutex::new(Vec::<MultimediaThreadProgress>::new()));
+
+        let status_clone = shared_status.clone();
+        let done_clone = shared_done.clone();
+
+        self.multimedia.video_compile_shared = Some((
+            shared_progress.clone(),
+            shared_status,
+            shared_done,
+            shared_frames,
+            shared_threads.clone(),
+        ));
+
+        let ctx_clone = ctx.clone();
+
+        std::thread::spawn(move || {
+            let probe = match probe_video_info(&media_path) {
+                Ok(info) => info,
+                Err(e) => {
+                    *status_clone.lock().unwrap() = Some(format!("Video probe failed: {}", e));
+                    *done_clone.lock().unwrap() = true;
+                    ctx_clone.request_repaint();
+                    return;
+                }
+            };
+            let total_frames = (probe.duration * target_fps as f32).ceil().max(1.0) as u32;
+            let frame_size = (probe.width * probe.height * 3) as usize;
+            let ranges = split_frame_ranges(total_frames, export_threads);
+            let keyframe_interval = target_fps.max(1) as u32;
+
+            if let Ok(mut threads) = shared_threads.lock() {
+                *threads = ranges
+                    .iter()
+                    .map(|(start, end)| MultimediaThreadProgress {
+                        start_frame: *start,
+                        end_frame: *end,
+                        current_frame: *start,
+                        status: MultimediaThreadStatus::Waiting,
+                    })
+                    .collect();
+            }
+            ctx_clone.request_repaint();
+
+            let mut worker_handles = Vec::new();
+            for (worker_idx, (start_frame, end_frame)) in ranges.iter().copied().enumerate() {
+                let media_path = media_path.clone();
+                let velocity_expr = velocity_expr.clone();
+                let thread_progress = shared_threads.clone();
+                let shared_progress_worker = shared_progress.clone();
+                let ctx_worker = ctx_clone.clone();
+
+                worker_handles.push(std::thread::spawn(
+                    move || -> anyhow::Result<crate::player::ExportChunkResult> {
+                        if let Ok(mut progress) = thread_progress.lock() {
+                            if let Some(entry) = progress.get_mut(worker_idx) {
+                                entry.status = MultimediaThreadStatus::Decoding;
+                            }
+                        }
+
+                        let child = Command::new("ffmpeg")
+                            .args([
+                                "-ss",
+                                &format!("{:.6}", start_frame as f64 / target_fps as f64),
+                                "-i",
+                                &media_path,
+                                "-frames:v",
+                                &(end_frame - start_frame).to_string(),
+                                "-f",
+                                "image2pipe",
+                                "-vcodec",
+                                "rawvideo",
+                                "-pix_fmt",
+                                "rgb24",
+                                "-r",
+                                &target_fps.to_string(),
+                                "-",
+                            ])
+                            .stdout(Stdio::piped())
+                            .stderr(Stdio::null())
+                            .spawn()?;
+
+                        let mut child = child;
+                        let mut stdout = child.stdout.take().expect("Failed to open stdout");
+                        let mut buffer = vec![0u8; frame_size];
+                        let mut generator = VideoParticleGenerator::new(
+                            probe.width,
+                            probe.height,
+                            target_fps,
+                            density,
+                            brightness_threshold,
+                            particle_size,
+                            point_size,
+                            rotation,
+                            &velocity_expr,
+                            start_frame,
+                        );
+                        let player = crate::player::PlayerState::default();
+
+                        let mut provider = |frame_idx: u32| -> anyhow::Result<Vec<Particle>> {
+                            if let Ok(mut progress) = thread_progress.lock() {
+                                if let Some(entry) = progress.get_mut(worker_idx) {
+                                    entry.status = MultimediaThreadStatus::Generating;
+                                    entry.current_frame = frame_idx;
+                                }
+                            }
+                            let completed_frames = if let Ok(progress) = thread_progress.lock() {
+                                progress
+                                    .iter()
+                                    .map(|entry| {
+                                        entry
+                                            .current_frame
+                                            .saturating_sub(entry.start_frame)
+                                            .min(entry.end_frame.saturating_sub(entry.start_frame))
+                                    })
+                                    .sum::<u32>()
+                            } else {
+                                0
+                            };
+                            if let Ok(mut pct) = shared_progress_worker.lock() {
+                                *pct = (completed_frames as f32 / total_frames as f32).min(1.0);
+                            }
+                            ctx_worker.request_repaint();
+                            if stdout.read_exact(&mut buffer).is_err() {
+                                return Err(anyhow::anyhow!(
+                                    "Failed: video ended before frame {} could be decoded.",
+                                    frame_idx
+                                ));
+                            }
+                            Ok(generator.next_frame(&buffer))
+                        };
+
+                        let chunk = player.build_export_chunk(
+                            start_frame,
+                            end_frame,
+                            start_frame,
+                            keyframe_interval,
+                            &mut provider,
+                        )?;
+
+                        let wait_status = child.wait()?;
+                        if !wait_status.success() {
+                            return Err(anyhow::anyhow!(
+                                "ffmpeg chunk worker exited with status {} for frames [{}..{})",
+                                wait_status,
+                                start_frame,
+                                end_frame
+                            ));
+                        }
+                        if let Ok(mut progress) = thread_progress.lock() {
+                            if let Some(entry) = progress.get_mut(worker_idx) {
+                                entry.current_frame = end_frame;
+                                entry.status = MultimediaThreadStatus::Encoded;
+                            }
+                        }
+                        let completed_frames = if let Ok(progress) = thread_progress.lock() {
+                            progress
+                                .iter()
+                                .map(|entry| {
+                                    entry
+                                        .current_frame
+                                        .saturating_sub(entry.start_frame)
+                                        .min(entry.end_frame.saturating_sub(entry.start_frame))
+                                })
+                                .sum::<u32>()
+                        } else {
+                            0
+                        };
+                        if let Ok(mut pct) = shared_progress_worker.lock() {
+                            *pct = (completed_frames as f32 / total_frames as f32).min(1.0);
+                        }
+                        ctx_worker.request_repaint();
+                        Ok(chunk)
+                    },
+                ));
+            }
+
+            let mut chunks = Vec::new();
+            for handle in worker_handles {
+                match handle.join() {
+                    Ok(Ok(chunk)) => {
+                        chunks.push(chunk);
+                        let completed_frames: u32 =
+                            chunks.iter().map(|c| c.end_frame - c.start_frame).sum();
+                        if let Ok(mut pct) = shared_progress.lock() {
+                            *pct = (completed_frames as f32 / total_frames as f32).min(1.0);
+                        }
+                        ctx_clone.request_repaint();
+                    }
+                    Ok(Err(e)) => {
+                        *status_clone.lock().unwrap() = Some(format!("Export failed: {}", e));
+                        *done_clone.lock().unwrap() = true;
+                        ctx_clone.request_repaint();
+                        return;
+                    }
+                    Err(_) => {
+                        *status_clone.lock().unwrap() =
+                            Some("Export failed: worker thread panicked".into());
+                        *done_clone.lock().unwrap() = true;
+                        ctx_clone.request_repaint();
+                        return;
+                    }
+                }
+            }
+
+            if let Ok(mut progress) = shared_threads.lock() {
+                for entry in progress.iter_mut() {
+                    entry.status = MultimediaThreadStatus::Merging;
+                    entry.current_frame = entry.end_frame;
+                }
+            }
+
+            let header = NblHeader {
+                version: 1,
+                target_fps,
+                total_frames,
+                texture_count: 0,
+                attributes: 0x03,
+                bbox_min: [0.0; 3],
+                bbox_max: [0.0; 3],
+            };
+            let player = crate::player::PlayerState::default();
+            let save_result = player.write_chunked_nbl(&path, &header, &[], total_frames, chunks);
+
+            match save_result {
+                Ok(_) => {
+                    *shared_progress.lock().unwrap() = 1.0;
+                    if let Ok(mut progress) = shared_threads.lock() {
+                        for entry in progress.iter_mut() {
+                            entry.status = MultimediaThreadStatus::Done;
+                        }
+                    }
+                    *status_clone.lock().unwrap() = Some(format!(
+                        "Export success! {} frames with {} threads.",
+                        total_frames, export_threads
+                    ));
+                }
+                Err(e) => {
+                    *status_clone.lock().unwrap() = Some(format!("Export failed: {}", e));
+                }
+            }
+
+            *done_clone.lock().unwrap() = true;
+            ctx_clone.request_repaint();
+        });
     }
 
     fn compile_video_all_frames(&mut self, ctx: &egui::Context) {
@@ -1090,46 +1707,32 @@ impl NebulaToolsApp {
         let shared_status = Arc::new(Mutex::new(None::<String>));
         let shared_done = Arc::new(Mutex::new(false));
         let shared_frames = Arc::new(Mutex::new(None::<Vec<Vec<Particle>>>));
+        let shared_threads = Arc::new(Mutex::new(Vec::<MultimediaThreadProgress>::new()));
 
         let progress_clone = shared_progress.clone();
         let status_clone = shared_status.clone();
         let done_clone = shared_done.clone();
         let frames_clone = shared_frames.clone();
 
-        self.multimedia.video_compile_shared =
-            Some((shared_progress, shared_status, shared_done, shared_frames));
+        self.multimedia.video_compile_shared = Some((
+            shared_progress,
+            shared_status,
+            shared_done,
+            shared_frames,
+            shared_threads,
+        ));
 
         let ctx_clone = ctx.clone();
 
         std::thread::spawn(move || {
-            let probe = Command::new("ffprobe")
-                .args([
-                    "-v",
-                    "error",
-                    "-select_streams",
-                    "v:0",
-                    "-show_entries",
-                    "stream=width,height,duration",
-                    "-of",
-                    "csv=p=0",
-                    &media_path,
-                ])
-                .output();
-
-            let (width, height, duration) = if let Ok(out) = probe {
-                let s = String::from_utf8_lossy(&out.stdout);
-                let parts: Vec<&str> = s.trim().split(',').collect();
-                if parts.len() >= 3 {
-                    (
-                        parts[0].parse::<u32>().unwrap_or(1280),
-                        parts[1].parse::<u32>().unwrap_or(720),
-                        parts[2].parse::<f32>().unwrap_or(10.0),
-                    )
-                } else {
-                    (1280, 720, 10.0)
+            let probe = match probe_video_info(&media_path) {
+                Ok(info) => info,
+                Err(e) => {
+                    *status_clone.lock().unwrap() = Some(format!("Video probe failed: {}", e));
+                    *done_clone.lock().unwrap() = true;
+                    ctx_clone.request_repaint();
+                    return;
                 }
-            } else {
-                (1280, 720, 10.0)
             };
 
             let child = Command::new("ffmpeg")
@@ -1164,136 +1767,28 @@ impl NebulaToolsApp {
             };
 
             let mut stdout = child.stdout.take().expect("Failed to open stdout");
-            let frame_size = (width * height * 3) as usize;
+            let frame_size = (probe.width * probe.height * 3) as usize;
             let mut buffer = vec![0u8; frame_size];
 
             let mut frames: Vec<Vec<Particle>> = Vec::new();
             let mut frame_count = 0usize;
-            let total_est_frames = (duration * target_fps as f32).ceil().max(1.0) as usize;
+            let total_est_frames = (probe.duration * target_fps as f32).ceil().max(1.0) as usize;
 
-            let cx = width as f32 / 2.0;
-            let cy = height as f32 / 2.0;
-            let copies_per_pixel = if density >= 1.0 {
-                density.floor() as u32
-            } else {
-                1u32
-            };
-
-            let stmts = crate::particleex::compile_expr(&velocity_expr);
-
-            use rand::Rng;
-            let mut rng = rand::thread_rng();
-
-            struct ScreenPixel {
-                idx: usize,
-                px: f32,
-                py: f32,
-                pz: f32,
-                id: i32,
-                ox: f32,
-                oy: f32,
-                oz: f32,
-            }
-
-            let mut screen_pixels = Vec::new();
-            let mut fixed_pid: i32 = 0;
-            // Pre-calculate screen layout to ensure stable PIDs and positions across frames
-            for y in 0..height {
-                for x in 0..width {
-                    if density < 1.0 && rng.gen::<f32>() > density {
-                        continue;
-                    }
-                    let idx = ((y * width + x) * 3) as usize;
-                    for c in 0..copies_per_pixel {
-                        let jx = if c == 0 {
-                            0.0
-                        } else {
-                            rng.gen_range(-0.5..0.5)
-                        };
-                        let jy = if c == 0 {
-                            0.0
-                        } else {
-                            rng.gen_range(-0.5..0.5)
-                        };
-                        let px = (x as f32 + jx - cx) * particle_size;
-                        let py = -(y as f32 + jy - cy) * particle_size;
-                        let (px, py, pz) = apply_euler_rotation(px, py, 0.0, rotation);
-
-                        screen_pixels.push(ScreenPixel {
-                            idx,
-                            px,
-                            py,
-                            pz,
-                            id: fixed_pid,
-                            ox: 0.0,
-                            oy: 0.0,
-                            oz: 0.0,
-                        });
-                        fixed_pid += 1;
-                    }
-                }
-            }
-
-            let mut pex_ctx = crate::particleex::ExprContext::new();
+            let mut generator = VideoParticleGenerator::new(
+                probe.width,
+                probe.height,
+                target_fps,
+                density,
+                brightness_threshold,
+                particle_size,
+                point_size,
+                rotation,
+                &velocity_expr,
+                0,
+            );
 
             while stdout.read_exact(&mut buffer).is_ok() {
-                let mut frame_particles = Vec::with_capacity(screen_pixels.len());
-                let t = frame_count as f64 / target_fps as f64;
-
-                for sp in &mut screen_pixels {
-                    let r = buffer[sp.idx];
-                    let g = buffer[sp.idx + 1];
-                    let b = buffer[sp.idx + 2];
-
-                    // Run velocity_expr per particle, cr/cg/cb override video pixel
-                    pex_ctx.set("t", crate::particleex::Value::Num(t));
-                    pex_ctx.set("x", crate::particleex::Value::Num((sp.px + sp.ox) as f64));
-                    pex_ctx.set("y", crate::particleex::Value::Num((sp.py + sp.oy) as f64));
-                    pex_ctx.set("z", crate::particleex::Value::Num((sp.pz + sp.oz) as f64));
-                    pex_ctx.set("cr", crate::particleex::Value::Num(r as f64 / 255.0));
-                    pex_ctx.set("cg", crate::particleex::Value::Num(g as f64 / 255.0));
-                    pex_ctx.set("cb", crate::particleex::Value::Num(b as f64 / 255.0));
-                    pex_ctx.set("alpha", crate::particleex::Value::Num(1.0));
-                    pex_ctx.set("mpsize", crate::particleex::Value::Num(point_size as f64));
-                    pex_ctx.set("vx", crate::particleex::Value::Num(0.0));
-                    pex_ctx.set("vy", crate::particleex::Value::Num(0.0));
-                    pex_ctx.set("vz", crate::particleex::Value::Num(0.0));
-                    pex_ctx.set("destroy", crate::particleex::Value::Num(0.0));
-                    pex_ctx.set("id", crate::particleex::Value::Num(sp.id as f64));
-
-                    if let Some(ref s) = stmts {
-                        crate::particleex::exec_stmts(s, &mut pex_ctx);
-                    }
-
-                    sp.ox += pex_ctx.get("vx").as_num() as f32;
-                    sp.oy += pex_ctx.get("vy").as_num() as f32;
-                    sp.oz += pex_ctx.get("vz").as_num() as f32;
-
-                    let luma = (r as f32 * 0.299 + g as f32 * 0.587 + b as f32 * 0.114) / 255.0;
-                    if luma < brightness_threshold {
-                        continue;
-                    }
-
-                    if pex_ctx.get("destroy").as_num() >= 1.0 {
-                        continue; // skip destroyed particles
-                    }
-
-                    let final_r = (pex_ctx.get("cr").as_num().clamp(0.0, 1.0) * 255.0) as u8;
-                    let final_g = (pex_ctx.get("cg").as_num().clamp(0.0, 1.0) * 255.0) as u8;
-                    let final_b = (pex_ctx.get("cb").as_num().clamp(0.0, 1.0) * 255.0) as u8;
-                    let final_a = (pex_ctx.get("alpha").as_num().clamp(0.0, 1.0) * 255.0) as u8;
-                    let final_size = pex_ctx.get("mpsize").as_num() as f32;
-
-                    frame_particles.push(Particle {
-                        id: sp.id,
-                        pos: [sp.px + sp.ox, sp.py + sp.oy, sp.pz + sp.oz],
-                        color: [final_r, final_g, final_b, final_a],
-                        size: final_size,
-                        tex_id: 0,
-                        seq_index: 0,
-                    });
-                }
-                frames.push(frame_particles);
+                frames.push(generator.next_frame(&buffer));
                 frame_count += 1;
 
                 // Update progress
