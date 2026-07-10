@@ -1342,7 +1342,11 @@ fn parsed_from_model(cmd: &ParticleexCommand) -> ParsedCommand {
             if parsed.abs() < 0.000001 {
                 0.1
             } else {
-                parsed.abs().max(if cmd.format.is_conditional() { 0.01 } else { 0.000001 })
+                parsed.abs().max(if cmd.format.is_conditional() {
+                    0.01
+                } else {
+                    0.000001
+                })
             }
         },
         shape_expr: cmd
@@ -1351,7 +1355,11 @@ fn parsed_from_model(cmd: &ParticleexCommand) -> ParsedCommand {
             .or_else(|| cmd.shape_expr.clone()),
         cpt: if cmd.format.is_animated() {
             let v = parse_int(cmd.count_per_tick.as_deref().unwrap_or("10"), 10);
-            if v == 0 { 10 } else { v }
+            if v == 0 {
+                10
+            } else {
+                v
+            }
         } else {
             10
         },
@@ -1360,7 +1368,9 @@ fn parsed_from_model(cmd: &ParticleexCommand) -> ParsedCommand {
 }
 
 fn parse_command(line: &str) -> Option<ParsedCommand> {
-    parse_command_model(line).ok().map(|cmd| parsed_from_model(&cmd))
+    parse_command_model(line)
+        .ok()
+        .map(|cmd| parsed_from_model(&cmd))
 }
 
 pub fn validate_command_model(cmd: &ParticleexCommand) -> Result<String, String> {
@@ -1892,12 +1902,7 @@ pub fn compile_entries(
         let entry_global_ids: Vec<u8> = entry
             .textures
             .iter()
-            .map(|tex| {
-                global_textures
-                    .iter()
-                    .position(|g| g == tex)
-                    .unwrap_or(0) as u8
-            })
+            .map(|tex| global_textures.iter().position(|g| g == tex).unwrap_or(0) as u8)
             .collect();
 
         for line in &lines {
@@ -1918,12 +1923,8 @@ pub fn compile_entries(
                         cmd.lifespan = entry.duration_override as u32;
                     }
 
-                    let (mut tracks, next_id) = generate_tracks(
-                        &cmd,
-                        p_id,
-                        &entry_global_ids,
-                        entry.texture_interval,
-                    );
+                    let (mut tracks, next_id) =
+                        generate_tracks(&cmd, p_id, &entry_global_ids, entry.texture_interval);
 
                     let offset = (entry.start_tick * TIME_SCALE).floor() as u32;
                     if offset > 0 {

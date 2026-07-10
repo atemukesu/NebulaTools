@@ -92,11 +92,8 @@ impl NebulaToolsApp {
                         .add_sized(
                             btn_size,
                             egui::Button::new(
-                                egui::RichText::new(format!(
-                                    "✨ {}",
-                                    self.i18n.tr("creator_btn")
-                                ))
-                                .size(20.0),
+                                egui::RichText::new(format!("✨ {}", self.i18n.tr("creator_btn")))
+                                    .size(20.0),
                             )
                             .rounding(8.0),
                         )
@@ -118,21 +115,32 @@ impl NebulaToolsApp {
                     ui.horizontal(|ui| {
                         let sponsor_desc = self.i18n.tr("sponsor_desc");
                         let sponsor_text = self.i18n.tr("sponsor");
-                        
+
                         ui.spacing_mut().item_spacing.x = 10.0;
-                        
+
                         // Centering
-                        let total_width = 460.0; 
+                        let total_width = 460.0;
                         ui.add_space((ui.available_width() - total_width).max(0.0) / 2.0);
-                        
+
                         ui.label(egui::RichText::new("💖").size(18.0));
-                        ui.label(egui::RichText::new(sponsor_desc).size(14.0).color(egui::Color32::from_gray(180)));
-                        
-                        if ui.add(egui::Button::new(egui::RichText::new(sponsor_text).strong())
-                            .rounding(8.0))
-                            .clicked() 
+                        ui.label(
+                            egui::RichText::new(sponsor_desc)
+                                .size(14.0)
+                                .color(egui::Color32::from_gray(180)),
+                        );
+
+                        if ui
+                            .add(
+                                egui::Button::new(egui::RichText::new(sponsor_text).strong())
+                                    .rounding(8.0),
+                            )
+                            .clicked()
                         {
-                            ui.ctx().output_mut(|o| o.open_url = Some(egui::output::OpenUrl::new_tab("https://afdian.com/a/atommix")));
+                            ui.ctx().output_mut(|o| {
+                                o.open_url = Some(egui::output::OpenUrl::new_tab(
+                                    "https://afdian.com/a/atommix",
+                                ))
+                            });
                         }
                     });
                 });
