@@ -1,4 +1,5 @@
 use crate::i18n::I18nManager;
+use crate::particleex::{ParticleexCommand, ParticleexCommandFormat, ParticleexEditorMode};
 use crate::player::{NblHeader, Particle, PlayerState};
 use crate::renderer::ParticleRenderer;
 use eframe::{
@@ -304,6 +305,9 @@ impl Default for MultimediaState {
 
 pub struct PexCommandEntry {
     pub command: String,
+    pub editor_mode: ParticleexEditorMode,
+    pub wizard_model: Option<ParticleexCommand>,
+    pub parse_error: Option<String>,
     pub start_tick: f32,
     pub position: [f32; 3],
     pub duration_override: f32, // 0 = use command's own lifespan
@@ -314,8 +318,13 @@ pub struct PexCommandEntry {
 
 impl Default for PexCommandEntry {
     fn default() -> Self {
+        let wizard_model = ParticleexCommand::for_format(ParticleexCommandFormat::Parameter);
+        let command = crate::particleex::format_command_model(&wizard_model);
         Self {
-            command: String::new(),
+            command,
+            editor_mode: ParticleexEditorMode::Wizard,
+            wizard_model: Some(wizard_model),
+            parse_error: None,
             start_tick: 0.0,
             position: [0.0, 0.0, 0.0],
             duration_override: 0.0,

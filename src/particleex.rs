@@ -675,7 +675,7 @@ pub fn compile_expr(src: &str) -> Option<Vec<Stmt>> {
 
 // ─────────────────────── Command Types ───────────────────────
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 struct CommandConfig {
     has_color: bool,
     is_normal: bool,
@@ -684,109 +684,327 @@ struct CommandConfig {
     is_polar: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParticleexEditorMode {
+    Wizard,
+    Text,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParticleexPrefix {
+    Particleex,
+    SlashParticleex,
+    Particlex,
+    SlashParticlex,
+}
+
+impl ParticleexPrefix {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Particleex => "particleex",
+            Self::SlashParticleex => "/particleex",
+            Self::Particlex => "particlex",
+            Self::SlashParticlex => "/particlex",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParticleexCommandFormat {
+    Normal,
+    Conditional,
+    Parameter,
+    PolarParameter,
+    RgbaParameter,
+    RgbaPolarParameter,
+    TickParameter,
+    TickPolarParameter,
+    RgbaTickParameter,
+    RgbaTickPolarParameter,
+}
+
+impl ParticleexCommandFormat {
+    pub const ALL: [Self; 10] = [
+        Self::Normal,
+        Self::Conditional,
+        Self::Parameter,
+        Self::PolarParameter,
+        Self::RgbaParameter,
+        Self::RgbaPolarParameter,
+        Self::TickParameter,
+        Self::TickPolarParameter,
+        Self::RgbaTickParameter,
+        Self::RgbaTickPolarParameter,
+    ];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Conditional => "conditional",
+            Self::Parameter => "parameter",
+            Self::PolarParameter => "polarparameter",
+            Self::RgbaParameter => "rgbaparameter",
+            Self::RgbaPolarParameter => "rgbapolarparameter",
+            Self::TickParameter => "tickparameter",
+            Self::TickPolarParameter => "tickpolarparameter",
+            Self::RgbaTickParameter => "rgbatickparameter",
+            Self::RgbaTickPolarParameter => "rgbatickpolarparameter",
+        }
+    }
+
+    fn config(&self) -> CommandConfig {
+        match self {
+            Self::Normal => CommandConfig {
+                has_color: true,
+                is_normal: true,
+                is_conditional: false,
+                is_animated: false,
+                is_polar: false,
+            },
+            Self::Conditional => CommandConfig {
+                has_color: true,
+                is_normal: false,
+                is_conditional: true,
+                is_animated: false,
+                is_polar: false,
+            },
+            Self::Parameter => CommandConfig {
+                has_color: true,
+                is_normal: false,
+                is_conditional: false,
+                is_animated: false,
+                is_polar: false,
+            },
+            Self::PolarParameter => CommandConfig {
+                has_color: true,
+                is_normal: false,
+                is_conditional: false,
+                is_animated: false,
+                is_polar: true,
+            },
+            Self::RgbaParameter => CommandConfig {
+                has_color: false,
+                is_normal: false,
+                is_conditional: false,
+                is_animated: false,
+                is_polar: false,
+            },
+            Self::RgbaPolarParameter => CommandConfig {
+                has_color: false,
+                is_normal: false,
+                is_conditional: false,
+                is_animated: false,
+                is_polar: true,
+            },
+            Self::TickParameter => CommandConfig {
+                has_color: true,
+                is_normal: false,
+                is_conditional: false,
+                is_animated: true,
+                is_polar: false,
+            },
+            Self::TickPolarParameter => CommandConfig {
+                has_color: true,
+                is_normal: false,
+                is_conditional: false,
+                is_animated: true,
+                is_polar: true,
+            },
+            Self::RgbaTickParameter => CommandConfig {
+                has_color: false,
+                is_normal: false,
+                is_conditional: false,
+                is_animated: true,
+                is_polar: false,
+            },
+            Self::RgbaTickPolarParameter => CommandConfig {
+                has_color: false,
+                is_normal: false,
+                is_conditional: false,
+                is_animated: true,
+                is_polar: true,
+            },
+        }
+    }
+
+    pub fn has_color(&self) -> bool {
+        self.config().has_color
+    }
+
+    pub fn is_normal(&self) -> bool {
+        self.config().is_normal
+    }
+
+    pub fn is_conditional(&self) -> bool {
+        self.config().is_conditional
+    }
+
+    pub fn is_animated(&self) -> bool {
+        self.config().is_animated
+    }
+
+    pub fn is_polar(&self) -> bool {
+        self.config().is_polar
+    }
+}
+
 /// Normalize hyphened command names → joined form, e.g. "tick-parameter" → "tickparameter"
 fn normalize_command_name(name: &str) -> String {
     name.replace('-', "")
 }
 
-fn get_command_config(type_name: &str) -> Option<CommandConfig> {
+fn parse_command_format(type_name: &str) -> Option<ParticleexCommandFormat> {
     let name = normalize_command_name(type_name);
     match name.as_str() {
-        "normal" => Some(CommandConfig {
-            has_color: true,
-            is_normal: true,
-            is_conditional: false,
-            is_animated: false,
-            is_polar: false,
-        }),
-        "conditional" => Some(CommandConfig {
-            has_color: true,
-            is_normal: false,
-            is_conditional: true,
-            is_animated: false,
-            is_polar: false,
-        }),
-        "parameter" => Some(CommandConfig {
-            has_color: true,
-            is_normal: false,
-            is_conditional: false,
-            is_animated: false,
-            is_polar: false,
-        }),
-        "polarparameter" => Some(CommandConfig {
-            has_color: true,
-            is_normal: false,
-            is_conditional: false,
-            is_animated: false,
-            is_polar: true,
-        }),
-        "rgbaparameter" => Some(CommandConfig {
-            has_color: false,
-            is_normal: false,
-            is_conditional: false,
-            is_animated: false,
-            is_polar: false,
-        }),
-        "rgbapolarparameter" => Some(CommandConfig {
-            has_color: false,
-            is_normal: false,
-            is_conditional: false,
-            is_animated: false,
-            is_polar: true,
-        }),
-        "tickparameter" => Some(CommandConfig {
-            has_color: true,
-            is_normal: false,
-            is_conditional: false,
-            is_animated: true,
-            is_polar: false,
-        }),
-        "tickpolarparameter" => Some(CommandConfig {
-            has_color: true,
-            is_normal: false,
-            is_conditional: false,
-            is_animated: true,
-            is_polar: true,
-        }),
-        "rgbatickparameter" => Some(CommandConfig {
-            has_color: false,
-            is_normal: false,
-            is_conditional: false,
-            is_animated: true,
-            is_polar: false,
-        }),
-        "rgbatickpolarparameter" => Some(CommandConfig {
-            has_color: false,
-            is_normal: false,
-            is_conditional: false,
-            is_animated: true,
-            is_polar: true,
-        }),
+        "normal" => Some(ParticleexCommandFormat::Normal),
+        "conditional" => Some(ParticleexCommandFormat::Conditional),
+        "parameter" => Some(ParticleexCommandFormat::Parameter),
+        "polarparameter" => Some(ParticleexCommandFormat::PolarParameter),
+        "rgbaparameter" => Some(ParticleexCommandFormat::RgbaParameter),
+        "rgbapolarparameter" => Some(ParticleexCommandFormat::RgbaPolarParameter),
+        "tickparameter" => Some(ParticleexCommandFormat::TickParameter),
+        "tickpolarparameter" => Some(ParticleexCommandFormat::TickPolarParameter),
+        "rgbatickparameter" => Some(ParticleexCommandFormat::RgbaTickParameter),
+        "rgbatickpolarparameter" => Some(ParticleexCommandFormat::RgbaTickPolarParameter),
         _ => None,
     }
 }
 
-// ─────────────────────── Command Parsing ───────────────────────
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParticleexCommand {
+    pub prefix: ParticleexPrefix,
+    pub format: ParticleexCommandFormat,
+    pub particle_name: String,
+    pub center: [String; 3],
+    pub color: Option<[String; 4]>,
+    pub base_velocity: [String; 3],
+    pub range: Option<[String; 3]>,
+    pub count: Option<String>,
+    pub condition_expr: Option<String>,
+    pub t_begin: Option<String>,
+    pub t_end: Option<String>,
+    pub shape_expr: Option<String>,
+    pub t_step: Option<String>,
+    pub count_per_tick: Option<String>,
+    pub lifespan: Option<String>,
+    pub speed_expr: Option<String>,
+    pub speed_step: Option<String>,
+}
+
+impl Default for ParticleexCommand {
+    fn default() -> Self {
+        Self {
+            prefix: ParticleexPrefix::Particleex,
+            format: ParticleexCommandFormat::Parameter,
+            particle_name: "end_rod".to_string(),
+            center: ["0".into(), "0".into(), "0".into()],
+            color: Some(["1".into(), "1".into(), "1".into(), "1".into()]),
+            base_velocity: ["0".into(), "0".into(), "0".into()],
+            range: None,
+            count: None,
+            condition_expr: None,
+            t_begin: Some("-10".into()),
+            t_end: Some("10".into()),
+            shape_expr: Some("x=t;y=sin(t);z=0".into()),
+            t_step: Some("0.1".into()),
+            count_per_tick: None,
+            lifespan: Some("200".into()),
+            speed_expr: Some("vx=0;vy=0;vz=0".into()),
+            speed_step: Some("1".into()),
+        }
+    }
+}
+
+impl ParticleexCommand {
+    pub fn for_format(format: ParticleexCommandFormat) -> Self {
+        let mut cmd = Self {
+            format,
+            ..Self::default()
+        };
+        cmd.apply_format_defaults();
+        cmd
+    }
+
+    pub fn format_label(&self) -> &'static str {
+        self.format.as_str()
+    }
+
+    pub fn apply_format_defaults(&mut self) {
+        match self.format {
+            ParticleexCommandFormat::Normal => {
+                self.color = Some(["1".into(), "1".into(), "1".into(), "1".into()]);
+                self.range = Some(["1".into(), "1".into(), "1".into()]);
+                self.count = Some("20".into());
+                self.condition_expr = None;
+                self.t_begin = None;
+                self.t_end = None;
+                self.shape_expr = None;
+                self.t_step = None;
+                self.count_per_tick = None;
+                self.lifespan = Some("200".into());
+                self.speed_expr = Some("vx=0;vy=0;vz=0".into());
+                self.speed_step = None;
+            }
+            ParticleexCommandFormat::Conditional => {
+                self.color = Some(["1".into(), "1".into(), "1".into(), "1".into()]);
+                self.range = Some(["1".into(), "1".into(), "1".into()]);
+                self.count = None;
+                self.condition_expr = Some("x*x+y*y+z*z<1".into());
+                self.t_begin = None;
+                self.t_end = None;
+                self.shape_expr = None;
+                self.t_step = Some("0.5".into());
+                self.count_per_tick = None;
+                self.lifespan = Some("200".into());
+                self.speed_expr = Some("vx=0;vy=0;vz=0".into());
+                self.speed_step = None;
+            }
+            _ => {
+                if self.format.has_color() {
+                    self.color = Some(["1".into(), "1".into(), "1".into(), "1".into()]);
+                } else {
+                    self.color = None;
+                }
+                self.range = None;
+                self.count = None;
+                self.condition_expr = None;
+                self.t_begin = Some("-10".into());
+                self.t_end = Some("10".into());
+                self.shape_expr = Some(if self.format.is_polar() {
+                    "dis=1;s1=t;s2=0".into()
+                } else {
+                    "x=t;y=sin(t);z=0".into()
+                });
+                self.t_step = Some("0.1".into());
+                self.count_per_tick = if self.format.is_animated() {
+                    Some("10".into())
+                } else {
+                    None
+                };
+                self.lifespan = Some("200".into());
+                self.speed_expr = Some("vx=0;vy=0;vz=0".into());
+                self.speed_step = Some("1".into());
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 struct ParsedCommand {
-    #[allow(dead_code)]
     type_name: String,
     config: CommandConfig,
     center: [f64; 3],
     color: [f64; 4],
     base_velocity: [f64; 3],
-    // Normal / Conditional mode
     range: [f64; 3],
     count: u32,
     lifespan: u32,
     speed_expr: Option<String>,
-    // Parameter mode
     t_begin: f64,
     t_end: f64,
     t_step: f64,
     shape_expr: Option<String>,
-    cpt: u32, // count per tick (animated)
+    cpt: u32,
     #[allow(dead_code)]
     speed_step: f64,
 }
@@ -808,8 +1026,8 @@ fn parse_num(val: &str, default: f64) -> f64 {
 /// Parse lifespan: 0 → default (200), -1 → very long (6000), positive → as-is
 fn resolve_lifespan(raw: &str, default: u32) -> u32 {
     match raw.parse::<i32>() {
-        Ok(n) if n < 0 => 6000, // -1 means "infinite", cap at ~5 min
-        Ok(0) => default,       // 0 means "use default lifetime"
+        Ok(n) if n < 0 => 6000,
+        Ok(0) => default,
         Ok(n) => n as u32,
         Err(_) => default,
     }
@@ -848,182 +1066,327 @@ fn split_args(line: &str) -> Vec<String> {
     parts
 }
 
-fn parse_command(line: &str) -> Option<ParsedCommand> {
-    let parts = split_args(line);
+fn parse_prefix_token(token: &str) -> Option<ParticleexPrefix> {
+    match token.to_lowercase().as_str() {
+        "particleex" => Some(ParticleexPrefix::Particleex),
+        "/particleex" => Some(ParticleexPrefix::SlashParticleex),
+        "particlex" => Some(ParticleexPrefix::Particlex),
+        "/particlex" => Some(ParticleexPrefix::SlashParticlex),
+        _ => None,
+    }
+}
+
+pub fn parse_command_model(line: &str) -> Result<ParticleexCommand, String> {
+    let parts = split_args(line.trim());
     if parts.len() < 3 {
-        return None;
+        return Err("Command is too short".into());
     }
 
     let mut idx = 0;
-    // Skip leading command word (particleex / particlex / /particleex / /particlex)
-    let first_lower = parts[0].to_lowercase();
-    if first_lower.contains("particlex") || first_lower.contains("particleex") {
-        idx = 1;
-    }
-
-    let type_name = parts.get(idx)?.to_lowercase();
-    let config = get_command_config(&type_name)?;
+    let prefix = parts
+        .get(0)
+        .and_then(|s| parse_prefix_token(s))
+        .ok_or_else(|| "Command must start with particleex or particlex".to_string())?;
     idx += 1;
 
-    let _particle_name = parts.get(idx).cloned().unwrap_or_default();
+    let format = parts
+        .get(idx)
+        .and_then(|s| parse_command_format(s))
+        .ok_or_else(|| "Unsupported Particleex command format".to_string())?;
     idx += 1;
 
-    let cx = parse_coord(parts.get(idx).map(|s| s.as_str()).unwrap_or("0"));
-    idx += 1;
-    let cy = parse_coord(parts.get(idx).map(|s| s.as_str()).unwrap_or("0"));
-    idx += 1;
-    let cz = parse_coord(parts.get(idx).map(|s| s.as_str()).unwrap_or("0"));
+    let particle_name = parts
+        .get(idx)
+        .cloned()
+        .ok_or_else(|| "Missing particle name".to_string())?;
     idx += 1;
 
-    let (cr, cg, cb, ca) = if config.has_color {
-        let r = parse_num(parts.get(idx).map(|s| s.as_str()).unwrap_or("0"), 0.0);
-        idx += 1;
-        let g = parse_num(parts.get(idx).map(|s| s.as_str()).unwrap_or("0"), 0.0);
-        idx += 1;
-        let b = parse_num(parts.get(idx).map(|s| s.as_str()).unwrap_or("0"), 0.0);
-        idx += 1;
-        let a = parse_num(parts.get(idx).map(|s| s.as_str()).unwrap_or("0"), 0.0);
-        idx += 1;
-        (r, g, b, a)
-    } else {
-        (1.0, 1.0, 1.0, 1.0)
+    let next = |idx: &mut usize, parts: &[String], name: &str| -> Result<String, String> {
+        let value = parts
+            .get(*idx)
+            .cloned()
+            .ok_or_else(|| format!("Missing {}", name))?;
+        *idx += 1;
+        Ok(value)
     };
 
-    let base_vx = parse_num(parts.get(idx).map(|s| s.as_str()).unwrap_or("0"), 0.0);
-    idx += 1;
-    let base_vy = parse_num(parts.get(idx).map(|s| s.as_str()).unwrap_or("0"), 0.0);
-    idx += 1;
-    let base_vz = parse_num(parts.get(idx).map(|s| s.as_str()).unwrap_or("0"), 0.0);
+    let center = [
+        next(&mut idx, &parts, "center x")?,
+        next(&mut idx, &parts, "center y")?,
+        next(&mut idx, &parts, "center z")?,
+    ];
+
+    let color = if format.has_color() {
+        Some([
+            next(&mut idx, &parts, "color r")?,
+            next(&mut idx, &parts, "color g")?,
+            next(&mut idx, &parts, "color b")?,
+            next(&mut idx, &parts, "color a")?,
+        ])
+    } else {
+        None
+    };
+
+    let base_velocity = [
+        next(&mut idx, &parts, "velocity x")?,
+        next(&mut idx, &parts, "velocity y")?,
+        next(&mut idx, &parts, "velocity z")?,
+    ];
+
+    if format.is_normal() {
+        let cmd = ParticleexCommand {
+            prefix,
+            format,
+            particle_name,
+            center,
+            color,
+            base_velocity,
+            range: Some([
+                next(&mut idx, &parts, "range x")?,
+                next(&mut idx, &parts, "range y")?,
+                next(&mut idx, &parts, "range z")?,
+            ]),
+            count: Some(next(&mut idx, &parts, "count")?),
+            condition_expr: None,
+            t_begin: None,
+            t_end: None,
+            shape_expr: None,
+            t_step: None,
+            count_per_tick: None,
+            lifespan: Some(parts.get(idx).cloned().unwrap_or_else(|| "200".into())),
+            speed_expr: parts[idx + 1..]
+                .iter()
+                .find(|arg| arg.contains('=') || arg.contains(';'))
+                .cloned(),
+            speed_step: None,
+        };
+        return Ok(cmd);
+    }
+
+    if format.is_conditional() {
+        let cmd = ParticleexCommand {
+            prefix,
+            format,
+            particle_name,
+            center,
+            color,
+            base_velocity,
+            range: Some([
+                next(&mut idx, &parts, "range x")?,
+                next(&mut idx, &parts, "range y")?,
+                next(&mut idx, &parts, "range z")?,
+            ]),
+            count: None,
+            condition_expr: Some(next(&mut idx, &parts, "condition expression")?),
+            t_begin: None,
+            t_end: None,
+            shape_expr: None,
+            t_step: Some(parts.get(idx).cloned().unwrap_or_else(|| "0.5".into())),
+            count_per_tick: None,
+            lifespan: Some(parts.get(idx + 1).cloned().unwrap_or_else(|| "200".into())),
+            speed_expr: parts.get(idx + 2).cloned(),
+            speed_step: None,
+        };
+        return Ok(cmd);
+    }
+
+    let t_begin = next(&mut idx, &parts, "t begin")?;
+    let t_end = next(&mut idx, &parts, "t end")?;
+    let shape_expr = next(&mut idx, &parts, "shape expression")?;
+    let t_step = parts.get(idx).cloned().unwrap_or_else(|| "0.1".into());
     idx += 1;
 
-    if config.is_normal || config.is_conditional {
-        let range_x = parse_num(parts.get(idx).map(|s| s.as_str()).unwrap_or("0"), 0.0);
+    let count_per_tick = if format.is_animated() {
+        let value = parts.get(idx).cloned().unwrap_or_else(|| "10".into());
         idx += 1;
-        let range_y = parse_num(parts.get(idx).map(|s| s.as_str()).unwrap_or("0"), 0.0);
-        idx += 1;
-        let range_z = parse_num(parts.get(idx).map(|s| s.as_str()).unwrap_or("0"), 0.0);
-        idx += 1;
+        Some(value)
+    } else {
+        None
+    };
 
-        if config.is_conditional {
-            // conditional: <range> <condition_expr> [step] [lifespan] [speed_expr] [speed_step] [group]
-            let cond_expr = parts.get(idx).cloned();
-            idx += 1;
-            let t_step = parse_num(parts.get(idx).map(|s| s.as_str()).unwrap_or("0.5"), 0.5)
-                .abs()
-                .max(0.01);
-            idx += 1;
-            let lifespan =
-                resolve_lifespan(parts.get(idx).map(|s| s.as_str()).unwrap_or("200"), 200);
-            idx += 1;
-            let speed_expr = parts.get(idx).cloned();
+    Ok(ParticleexCommand {
+        prefix,
+        format,
+        particle_name,
+        center,
+        color,
+        base_velocity,
+        range: None,
+        count: None,
+        condition_expr: None,
+        t_begin: Some(t_begin),
+        t_end: Some(t_end),
+        shape_expr: Some(shape_expr),
+        t_step: Some(t_step),
+        count_per_tick,
+        lifespan: Some(parts.get(idx).cloned().unwrap_or_else(|| "200".into())),
+        speed_expr: parts.get(idx + 1).cloned(),
+        speed_step: Some(parts.get(idx + 2).cloned().unwrap_or_else(|| "1".into())),
+    })
+}
 
-            return Some(ParsedCommand {
-                type_name,
-                config,
-                center: [cx, cy, cz],
-                color: [cr, cg, cb, ca],
-                base_velocity: [base_vx, base_vy, base_vz],
-                range: [range_x, range_y, range_z],
-                count: 0,
-                lifespan,
-                speed_expr,
-                t_begin: 0.0,
-                t_end: 0.0,
-                t_step,
-                shape_expr: cond_expr,
-                cpt: 0,
-                speed_step: 1.0,
-            });
+pub fn format_command_model(cmd: &ParticleexCommand) -> String {
+    let mut parts = vec![
+        cmd.prefix.as_str().to_string(),
+        cmd.format.as_str().to_string(),
+        cmd.particle_name.clone(),
+        cmd.center[0].clone(),
+        cmd.center[1].clone(),
+        cmd.center[2].clone(),
+    ];
+
+    if let Some(color) = &cmd.color {
+        parts.extend(color.iter().cloned());
+    }
+
+    parts.extend(cmd.base_velocity.iter().cloned());
+
+    if cmd.format.is_normal() {
+        if let Some(range) = &cmd.range {
+            parts.extend(range.iter().cloned());
         }
-
-        // normal mode
-        let count = parse_int(parts.get(idx).map(|s| s.as_str()).unwrap_or("1"), 1).max(1);
-        idx += 1;
-
-        let lifespan_str = parts.get(idx).map(|s| s.as_str()).unwrap_or("200");
-        let mut lifespan = resolve_lifespan(lifespan_str, 200);
-        idx += 1;
-        let mut speed_expr: Option<String> = None;
-
-        while idx < parts.len() {
-            let arg = &parts[idx];
-            idx += 1;
-            if arg.contains('=') || arg.contains(';') {
-                speed_expr = Some(arg.clone());
+        parts.push(cmd.count.clone().unwrap_or_else(|| "1".into()));
+        parts.push(cmd.lifespan.clone().unwrap_or_else(|| "200".into()));
+        if let Some(speed_expr) = &cmd.speed_expr {
+            if !speed_expr.trim().is_empty() {
+                parts.push(speed_expr.clone());
             }
         }
-
-        if lifespan == 0 {
-            lifespan = 200;
-        }
-
-        return Some(ParsedCommand {
-            type_name,
-            config,
-            center: [cx, cy, cz],
-            color: [cr, cg, cb, ca],
-            base_velocity: [base_vx, base_vy, base_vz],
-            range: [range_x, range_y, range_z],
-            count,
-            lifespan,
-            speed_expr,
-            t_begin: 0.0,
-            t_end: 0.0,
-            t_step: 0.0,
-            shape_expr: None,
-            cpt: 0,
-            speed_step: 1.0,
-        });
+        return parts.join(" ");
     }
 
-    // Parameter modes
-    let t_begin = parse_num(parts.get(idx).map(|s| s.as_str()).unwrap_or("-10"), -10.0);
-    idx += 1;
-    let t_end = parse_num(parts.get(idx).map(|s| s.as_str()).unwrap_or("10"), 10.0);
-    idx += 1;
-    let shape_expr = parts.get(idx).cloned();
-    idx += 1;
-    let mut t_step = parse_num(parts.get(idx).map(|s| s.as_str()).unwrap_or("0.1"), 0.1);
-    idx += 1;
-    if t_step.abs() < 0.000001 {
-        t_step = 0.1;
+    if cmd.format.is_conditional() {
+        if let Some(range) = &cmd.range {
+            parts.extend(range.iter().cloned());
+        }
+        parts.push(
+            cmd.condition_expr
+                .clone()
+                .unwrap_or_else(|| "x*x+y*y+z*z<1".into()),
+        );
+        parts.push(cmd.t_step.clone().unwrap_or_else(|| "0.5".into()));
+        parts.push(cmd.lifespan.clone().unwrap_or_else(|| "200".into()));
+        if let Some(speed_expr) = &cmd.speed_expr {
+            if !speed_expr.trim().is_empty() {
+                parts.push(speed_expr.clone());
+            }
+        }
+        return parts.join(" ");
     }
 
-    let cpt = if config.is_animated {
-        let v = parse_int(parts.get(idx).map(|s| s.as_str()).unwrap_or("10"), 10);
-        idx += 1;
-        if v == 0 {
-            10
-        } else {
-            v
+    parts.push(cmd.t_begin.clone().unwrap_or_else(|| "-10".into()));
+    parts.push(cmd.t_end.clone().unwrap_or_else(|| "10".into()));
+    parts.push(
+        cmd.shape_expr
+            .clone()
+            .unwrap_or_else(|| "x=t;y=sin(t);z=0".into()),
+    );
+    parts.push(cmd.t_step.clone().unwrap_or_else(|| "0.1".into()));
+
+    if cmd.format.is_animated() {
+        parts.push(cmd.count_per_tick.clone().unwrap_or_else(|| "10".into()));
+    }
+
+    parts.push(cmd.lifespan.clone().unwrap_or_else(|| "200".into()));
+    if let Some(speed_expr) = &cmd.speed_expr {
+        if !speed_expr.trim().is_empty() {
+            parts.push(speed_expr.clone());
         }
-    } else {
-        10
-    };
+    }
+    parts.push(cmd.speed_step.clone().unwrap_or_else(|| "1".into()));
+    parts.join(" ")
+}
 
-    let lifespan = resolve_lifespan(parts.get(idx).map(|s| s.as_str()).unwrap_or("200"), 200);
-    idx += 1;
-    let speed_expr = parts.get(idx).cloned();
-    idx += 1;
-    let speed_step = parse_num(parts.get(idx).map(|s| s.as_str()).unwrap_or("1"), 1.0);
+fn parsed_from_model(cmd: &ParticleexCommand) -> ParsedCommand {
+    let config = cmd.format.config();
+    let color = cmd
+        .color
+        .clone()
+        .unwrap_or(["1".into(), "1".into(), "1".into(), "1".into()]);
+    let range = cmd
+        .range
+        .clone()
+        .unwrap_or(["0".into(), "0".into(), "0".into()]);
 
-    Some(ParsedCommand {
-        type_name,
+    ParsedCommand {
+        type_name: cmd.format.as_str().to_string(),
         config,
-        center: [cx, cy, cz],
-        color: [cr, cg, cb, ca],
-        base_velocity: [base_vx, base_vy, base_vz],
-        range: [0.0; 3],
-        count: 0,
-        lifespan,
-        speed_expr,
-        t_begin,
-        t_end,
-        t_step,
-        shape_expr,
-        cpt,
-        speed_step,
-    })
+        center: [
+            parse_coord(&cmd.center[0]),
+            parse_coord(&cmd.center[1]),
+            parse_coord(&cmd.center[2]),
+        ],
+        color: [
+            parse_num(&color[0], 1.0),
+            parse_num(&color[1], 1.0),
+            parse_num(&color[2], 1.0),
+            parse_num(&color[3], 1.0),
+        ],
+        base_velocity: [
+            parse_num(&cmd.base_velocity[0], 0.0),
+            parse_num(&cmd.base_velocity[1], 0.0),
+            parse_num(&cmd.base_velocity[2], 0.0),
+        ],
+        range: [
+            parse_num(&range[0], 0.0),
+            parse_num(&range[1], 0.0),
+            parse_num(&range[2], 0.0),
+        ],
+        count: parse_int(cmd.count.as_deref().unwrap_or("1"), 1).max(1),
+        lifespan: resolve_lifespan(cmd.lifespan.as_deref().unwrap_or("200"), 200),
+        speed_expr: cmd.speed_expr.clone(),
+        t_begin: parse_num(cmd.t_begin.as_deref().unwrap_or("-10"), -10.0),
+        t_end: parse_num(cmd.t_end.as_deref().unwrap_or("10"), 10.0),
+        t_step: {
+            let parsed = parse_num(cmd.t_step.as_deref().unwrap_or("0.1"), 0.1);
+            if parsed.abs() < 0.000001 {
+                0.1
+            } else {
+                parsed.abs().max(if cmd.format.is_conditional() { 0.01 } else { 0.000001 })
+            }
+        },
+        shape_expr: cmd
+            .condition_expr
+            .clone()
+            .or_else(|| cmd.shape_expr.clone()),
+        cpt: if cmd.format.is_animated() {
+            let v = parse_int(cmd.count_per_tick.as_deref().unwrap_or("10"), 10);
+            if v == 0 { 10 } else { v }
+        } else {
+            10
+        },
+        speed_step: parse_num(cmd.speed_step.as_deref().unwrap_or("1"), 1.0),
+    }
+}
+
+fn parse_command(line: &str) -> Option<ParsedCommand> {
+    parse_command_model(line).ok().map(|cmd| parsed_from_model(&cmd))
+}
+
+pub fn validate_command_model(cmd: &ParticleexCommand) -> Result<String, String> {
+    let parsed = parsed_from_model(cmd);
+    let mode = &parsed.type_name;
+    let lifespan = parsed.lifespan;
+    let info = if parsed.config.is_normal {
+        format!("✅ {} | count={} lifespan={}", mode, parsed.count, lifespan)
+    } else if parsed.config.is_conditional {
+        format!(
+            "✅ {} | range={:.1}×{:.1}×{:.1} lifespan={}",
+            mode,
+            parsed.range[0] * 2.0,
+            parsed.range[1] * 2.0,
+            parsed.range[2] * 2.0,
+            lifespan
+        )
+    } else {
+        let total =
+            ((parsed.t_end - parsed.t_begin) / parsed.t_step.abs().max(0.0001)).floor() as u32 + 1;
+        format!(
+            "✅ {} | t=[{:.1}..{:.1}] particles≈{} lifespan={}",
+            mode, parsed.t_begin, parsed.t_end, total, lifespan
+        )
+    };
+    Ok(info)
 }
 
 // ─────────────────────── Track ───────────────────────
@@ -1599,39 +1962,67 @@ pub fn validate_command(line: &str) -> Result<String, String> {
     if trimmed.is_empty() {
         return Err("Empty command".into());
     }
-    let lower = trimmed.to_lowercase();
-    if !lower.starts_with("particleex")
-        && !lower.starts_with("/particleex")
-        && !lower.starts_with("particlex")
-        && !lower.starts_with("/particlex")
-    {
-        return Err("Command must start with particleex or particlex".into());
+    let model = parse_command_model(trimmed)?;
+    validate_command_model(&model)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn roundtrip(input: &str) {
+        let model = parse_command_model(input).expect("parse should succeed");
+        let formatted = format_command_model(&model);
+        let reparsed = parse_command_model(&formatted).expect("reparse should succeed");
+        assert_eq!(model, reparsed, "roundtrip mismatch for {input}");
+        validate_command_model(&model).expect("model validation should succeed");
     }
-    match parse_command(trimmed) {
-        Some(cmd) => {
-            let mode = &cmd.type_name;
-            let lifespan = cmd.lifespan;
-            let info = if cmd.config.is_normal {
-                format!("✅ {} | count={} lifespan={}", mode, cmd.count, lifespan)
-            } else if cmd.config.is_conditional {
-                format!(
-                    "✅ {} | range={:.1}×{:.1}×{:.1} lifespan={}",
-                    mode,
-                    cmd.range[0] * 2.0,
-                    cmd.range[1] * 2.0,
-                    cmd.range[2] * 2.0,
-                    lifespan
-                )
-            } else {
-                let total =
-                    ((cmd.t_end - cmd.t_begin) / cmd.t_step.abs().max(0.0001)).floor() as u32 + 1;
-                format!(
-                    "✅ {} | t=[{:.1}..{:.1}] particles≈{} lifespan={}",
-                    mode, cmd.t_begin, cmd.t_end, total, lifespan
-                )
-            };
-            Ok(info)
+
+    #[test]
+    fn roundtrips_all_supported_formats() {
+        let cases = [
+            "particleex normal end_rod ~0 1 -2 1 0.5 0.25 1 0 0.1 0 2 4 6 200 vx=0;vy=0;vz=0",
+            "particleex conditional dust 0 0 0 1 1 1 1 0 0 0 2 2 2 x*x+y*y+z*z<1 0.25 120 vx=x;vy=y;vz=z",
+            "particleex parameter end_rod 0 0 0 1 1 1 1 0 0 0 -3 3 x=t;y=sin(t);z=0 0.1 120 vx=0;vy=0;vz=0 1",
+            "particleex polarparameter end_rod 0 0 0 1 1 1 1 0 0 0 0 6.28 dis=1;s1=t;s2=0 0.1 120 vx=0;vy=0;vz=0 1",
+            "particleex rgbaparameter end_rod 0 0 0 0 0 0 -1 1 x=t;y=0;z=0;cr=1;cg=0;cb=0;alpha=1 0.2 80 vx=0;vy=0;vz=0 1",
+            "particleex rgbapolarparameter end_rod 0 0 0 0 0 0 0 6.28 dis=1;s1=t;s2=0;cr=1;cg=1;cb=1;alpha=1 0.1 90 vx=0;vy=0;vz=0 1",
+            "particleex tickparameter end_rod 0 0 0 1 1 1 1 0 0 0 -2 2 x=t;y=t*t;z=0 0.1 4 100 vx=0;vy=0;vz=0 1",
+            "particleex tickpolarparameter end_rod 0 0 0 1 1 1 1 0 0 0 0 6.28 dis=1;s1=t;s2=t/4 0.2 5 100 vx=0;vy=0;vz=0 1",
+            "particleex rgbatickparameter end_rod 0 0 0 0 0 0 -2 2 x=t;y=0;z=0;cr=1;cg=0;cb=0;alpha=1 0.2 3 100 vx=0;vy=0;vz=0 1",
+            "particleex rgbatickpolarparameter end_rod 0 0 0 0 0 0 0 6.28 dis=1;s1=t;s2=0;cr=0;cg=1;cb=1;alpha=1 0.2 3 100 vx=0;vy=0;vz=0 1",
+        ];
+
+        for case in cases {
+            roundtrip(case);
         }
-        None => Err("❌ Failed to parse command arguments".into()),
+    }
+
+    #[test]
+    fn preserves_special_tokens_and_prefix() {
+        let input = "/particlex normal sparkle ~ ~1 ~-2 1 .5 .25 1 0 0 0 2 4 6 -1 vx=0;vy=0;vz=0";
+        let model = parse_command_model(input).expect("parse should succeed");
+        assert_eq!(model.prefix, ParticleexPrefix::SlashParticlex);
+        assert_eq!(model.center[0], "~");
+        assert_eq!(model.center[1], "~1");
+        assert_eq!(model.center[2], "~-2");
+        assert_eq!(model.lifespan.as_deref(), Some("-1"));
+    }
+
+    #[test]
+    fn compile_entries_accepts_wizard_generated_text() {
+        let cmd = ParticleexCommand::for_format(ParticleexCommandFormat::Parameter);
+        let formatted = format_command_model(&cmd);
+        let entries = [CompileEntry {
+            command: formatted,
+            start_tick: 0.0,
+            position: [0.0; 3],
+            duration_override: 0.0,
+            textures: vec![],
+            texture_interval: 20,
+        }];
+        let (frames, fps, _) = compile_entries(&entries).expect("compile should succeed");
+        assert!(!frames.is_empty());
+        assert_eq!(fps, 60);
     }
 }
