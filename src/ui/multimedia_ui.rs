@@ -6,6 +6,7 @@ use ab_glyph::{Font, PxScale, ScaleFont};
 use eframe::egui;
 use image::{DynamicImage, GenericImageView};
 use std::io::Read;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 
@@ -454,12 +455,6 @@ impl NebulaToolsApp {
                             {
                                 self.compile_multimedia_preview(ctx, false);
                             }
-                            if ui
-                                .button(format!("💾 {}", self.i18n.tr("export_nbl")))
-                                .clicked()
-                            {
-                                self.export_multimedia_nbl(ctx);
-                            }
                         });
 
                         if let Some(msg) = &self.multimedia.status_msg {
@@ -547,18 +542,17 @@ impl NebulaToolsApp {
                         if let Ok(status) = status_arc.lock() {
                             self.multimedia.status_msg = status.clone();
                         }
-                        // Pick up compiled frames
-                        if let Ok(mut frames_lock) = frames_arc.lock() {
-                            if let Some(mut frames) = frames_lock.take() {
-                                self.apply_texture_animation_to_frames(
-                                    &mut frames,
-                                    &self.multimedia.texture_animation.textures,
-                                    self.multimedia.texture_animation.texture_interval,
-                                );
-                                self.multimedia.preview_frames = Some(frames);
-                                self.multimedia.preview_playing = true;
-                                self.multimedia.preview_frame_idx = 0;
-                            }
+                        let compiled_frames = frames_arc
+                            .lock()
+                            .ok()
+                            .and_then(|mut frames_lock| frames_lock.take());
+                        if let Some(mut frames) = compiled_frames {
+                            self.apply_texture_animation_to_frames(
+                                &mut frames,
+                                &self.multimedia.texture_animation.textures,
+                                self.multimedia.texture_animation.texture_interval,
+                            );
+                            self.finalize_multimedia_preview_from_frames(frames);
                         }
                         self.multimedia.thread_progress.clear();
                         self.multimedia.video_compile_shared = None;
@@ -932,6 +926,56 @@ impl NebulaToolsApp {
         self.prepare_render_data_from(&frames[idx])
     }
 
+    fn load_preview_frames_from_nbl(&mut self, path: &std::path::Path) -> anyhow::Result<Vec<Vec<Particle>>> {
+        let mut player = crate::player::PlayerState::default();
+        player.load_file(path.to_path_buf())?;
+        let total_frames = player
+            .header
+            .as_ref()
+            .map(|header| header.total_frames)
+            .unwrap_or(0);
+        let mut frames = Vec::with_capacity(total_frames as usize);
+        for frame_idx in 0..total_frames {
+            player.seek_to(frame_idx)?;
+            let mut frame_particles: Vec<Particle> = player.particles.values().cloned().collect();
+            frame_particles.sort_unstable_by_key(|particle| particle.id);
+            frames.push(frame_particles);
+        }
+        Ok(frames)
+    }
+
+    fn build_multimedia_preview_path(&self) -> PathBuf {
+        std::env::temp_dir().join("nebula_tools_multimedia_preview.nbl")
+    }
+
+    fn save_preview_frames_to_nbl(
+        &mut self,
+        path: &std::path::Path,
+        frames: &[Vec<Particle>],
+    ) -> anyhow::Result<Vec<Vec<Particle>>> {
+        let (bbox_min, bbox_max) = crate::player::recalculate_bbox(frames);
+        let textures = build_texture_entries(&self.multimedia.texture_animation.textures);
+        let header = NblHeader {
+            version: 1,
+            target_fps: self.multimedia.target_fps,
+            total_frames: frames.len() as u32,
+            texture_count: textures.len() as u16,
+            attributes: 0x03,
+            bbox_min,
+            bbox_max,
+        };
+        let path_buf = path.to_path_buf();
+        self.player.save_file(&path_buf, &header, &textures, frames)?;
+        self.load_preview_frames_from_nbl(path)
+    }
+
+    fn finalize_multimedia_preview_from_frames(&mut self, frames: Vec<Vec<Particle>>) {
+        self.multimedia.preview_frames = Some(frames);
+        self.multimedia.status_msg = Some("Compilation Success! Preview loaded from local NBL.".to_string());
+        self.multimedia.preview_playing = true;
+        self.multimedia.preview_frame_idx = 0;
+    }
+
     fn compile_multimedia_preview(&mut self, ctx: &egui::Context, source_only: bool) {
         self.multimedia.status_msg = Some(
             if source_only {
@@ -1076,8 +1120,8 @@ impl NebulaToolsApp {
                     return;
                 }
 
-                // Compile all video frames in background thread
-                self.compile_video_all_frames(ctx);
+                // Compile video preview by exporting to a local NBL first
+                self.compile_video_preview_via_nbl(ctx);
                 return;
             } else {
                 self.multimedia.status_msg = Some("No Video selected".into());
@@ -1362,50 +1406,21 @@ impl NebulaToolsApp {
                 frames.push(frame_particles);
             }
 
-            self.apply_texture_animation_to_frames(
-                &mut frames,
-                &self.multimedia.texture_animation.textures,
-                self.multimedia.texture_animation.texture_interval,
-            );
-            self.multimedia.preview_frames = Some(frames);
-            self.multimedia.status_msg = Some("Compilation Success!".to_string());
-            self.multimedia.preview_playing = true;
-            self.multimedia.preview_frame_idx = 0;
+            let preview_path = self.build_multimedia_preview_path();
+            match self.save_preview_frames_to_nbl(&preview_path, &frames) {
+                Ok(preview_frames) => {
+                    self.finalize_multimedia_preview_from_frames(preview_frames);
+                }
+                Err(e) => {
+                    self.multimedia.status_msg = Some(format!("Preview NBL failed: {}", e));
+                }
+            }
         }
     }
 
-    pub fn export_multimedia_nbl(&mut self, ctx: &egui::Context) {
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter("Nebula", &["nbl"])
-            .save_file()
-        {
-            if self.multimedia.mode == 2 {
-                self.export_video_nbl_streaming(ctx, path);
-                return;
-            }
-
-            if let Some(frames) = &self.multimedia.preview_frames {
-                let (bbox_min, bbox_max) = crate::player::recalculate_bbox(frames);
-                let textures = build_texture_entries(&self.multimedia.texture_animation.textures);
-                let header = NblHeader {
-                    version: 1,
-                    target_fps: self.multimedia.target_fps,
-                    total_frames: frames.len() as u32,
-                    texture_count: textures.len() as u16,
-                    attributes: 0x03,
-                    bbox_min,
-                    bbox_max,
-                };
-
-                match self.player.save_file(&path, &header, &textures, frames) {
-                    Ok(_) => self.multimedia.status_msg = Some("Export success!".into()),
-                    Err(e) => self.multimedia.status_msg = Some(format!("Export failed: {}", e)),
-                }
-            } else {
-                self.multimedia.status_msg =
-                    Some("No compiled preview. Please compile first.".into());
-            }
-        }
+    fn compile_video_preview_via_nbl(&mut self, ctx: &egui::Context) {
+        let preview_path = self.build_multimedia_preview_path();
+        self.export_video_nbl_streaming(ctx, preview_path);
     }
 
     fn export_video_nbl_streaming(&mut self, ctx: &egui::Context, path: std::path::PathBuf) {
@@ -1674,138 +1689,6 @@ impl NebulaToolsApp {
                 Err(e) => {
                     *status_clone.lock().unwrap() = Some(format!("Export failed: {}", e));
                 }
-            }
-
-            *done_clone.lock().unwrap() = true;
-            ctx_clone.request_repaint();
-        });
-    }
-
-    fn compile_video_all_frames(&mut self, ctx: &egui::Context) {
-        let media_path = match &self.multimedia.media_path {
-            Some(p) => p.clone(),
-            None => {
-                self.multimedia.status_msg = Some("No video selected!".into());
-                return;
-            }
-        };
-
-        self.multimedia.is_processing = true;
-        self.multimedia.status_msg = Some("Compiling video frames...".into());
-        self.multimedia.processing_progress = Some(0.0);
-
-        let target_fps = self.multimedia.target_fps;
-        let density = self.multimedia.density.max(0.000001);
-        let brightness_threshold = self.multimedia.brightness_threshold;
-        let particle_size = self.multimedia.particle_size;
-        let point_size = self.multimedia.point_size;
-        let rotation = self.multimedia.rotation;
-        let velocity_expr = self.multimedia.velocity_expr.clone();
-
-        // Shared state for thread communication
-        let shared_progress = Arc::new(Mutex::new(0.0f32));
-        let shared_status = Arc::new(Mutex::new(None::<String>));
-        let shared_done = Arc::new(Mutex::new(false));
-        let shared_frames = Arc::new(Mutex::new(None::<Vec<Vec<Particle>>>));
-        let shared_threads = Arc::new(Mutex::new(Vec::<MultimediaThreadProgress>::new()));
-
-        let progress_clone = shared_progress.clone();
-        let status_clone = shared_status.clone();
-        let done_clone = shared_done.clone();
-        let frames_clone = shared_frames.clone();
-
-        self.multimedia.video_compile_shared = Some((
-            shared_progress,
-            shared_status,
-            shared_done,
-            shared_frames,
-            shared_threads,
-        ));
-
-        let ctx_clone = ctx.clone();
-
-        std::thread::spawn(move || {
-            let probe = match probe_video_info(&media_path) {
-                Ok(info) => info,
-                Err(e) => {
-                    *status_clone.lock().unwrap() = Some(format!("Video probe failed: {}", e));
-                    *done_clone.lock().unwrap() = true;
-                    ctx_clone.request_repaint();
-                    return;
-                }
-            };
-
-            let child = Command::new("ffmpeg")
-                .args([
-                    "-i",
-                    &media_path,
-                    "-f",
-                    "image2pipe",
-                    "-vcodec",
-                    "rawvideo",
-                    "-pix_fmt",
-                    "rgb24",
-                    "-r",
-                    &target_fps.to_string(),
-                    "-",
-                ])
-                .stdout(Stdio::piped())
-                .stderr(Stdio::null())
-                .spawn();
-
-            let mut child = match child {
-                Ok(c) => c,
-                Err(e) => {
-                    *status_clone.lock().unwrap() = Some(format!(
-                        "Failed to start FFmpeg: {}. Is FFmpeg installed?",
-                        e
-                    ));
-                    *done_clone.lock().unwrap() = true;
-                    ctx_clone.request_repaint();
-                    return;
-                }
-            };
-
-            let mut stdout = child.stdout.take().expect("Failed to open stdout");
-            let frame_size = (probe.width * probe.height * 3) as usize;
-            let mut buffer = vec![0u8; frame_size];
-
-            let mut frames: Vec<Vec<Particle>> = Vec::new();
-            let mut frame_count = 0usize;
-            let total_est_frames = (probe.duration * target_fps as f32).ceil().max(1.0) as usize;
-
-            let mut generator = VideoParticleGenerator::new(
-                probe.width,
-                probe.height,
-                target_fps,
-                density,
-                brightness_threshold,
-                particle_size,
-                point_size,
-                rotation,
-                &velocity_expr,
-                0,
-            );
-
-            while stdout.read_exact(&mut buffer).is_ok() {
-                frames.push(generator.next_frame(&buffer));
-                frame_count += 1;
-
-                // Update progress
-                let pct = (frame_count as f32 / total_est_frames as f32).min(1.0);
-                *progress_clone.lock().unwrap() = pct;
-                ctx_clone.request_repaint();
-            }
-
-            let _ = child.kill();
-
-            if !frames.is_empty() {
-                *status_clone.lock().unwrap() =
-                    Some(format!("Compilation Success! {} frames.", frames.len()));
-                *frames_clone.lock().unwrap() = Some(frames);
-            } else {
-                *status_clone.lock().unwrap() =
-                    Some("Failed: no frames decoded from video.".into());
             }
 
             *done_clone.lock().unwrap() = true;

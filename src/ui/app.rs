@@ -864,10 +864,6 @@ impl eframe::App for NebulaToolsApp {
 
                 ui.menu_button(self.i18n.tr("file"), |ui| {
                     if self.mode == AppMode::Multimedia {
-                        if ui.button(self.i18n.tr("export_nbl")).clicked() {
-                            self.export_multimedia_nbl(ctx);
-                            ui.close_menu();
-                        }
                     } else if self.mode == AppMode::Creator {
                         if ui.button(self.i18n.tr("export_nbl")).clicked() {
                             self.export_creator_nbl();
