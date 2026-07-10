@@ -115,12 +115,16 @@ impl NebulaToolsApp {
                                         ui.end_row();
 
                                         ui.label(
-                                            egui::RichText::new(self.i18n.tr("pex_help_example_title"))
-                                                .strong(),
+                                            egui::RichText::new(
+                                                self.i18n.tr("pex_help_example_title"),
+                                            )
+                                            .strong(),
                                         );
                                         ui.label(
-                                            egui::RichText::new(self.i18n.tr("pex_help_example_val"))
-                                                .monospace(),
+                                            egui::RichText::new(
+                                                self.i18n.tr("pex_help_example_val"),
+                                            )
+                                            .monospace(),
                                         );
                                         ui.end_row();
                                     });
@@ -197,7 +201,10 @@ impl NebulaToolsApp {
                                 });
 
                                 ui.add_space(6.0);
-                                ui.label(egui::RichText::new(self.i18n.tr("pex_command_preview")).strong());
+                                ui.label(
+                                    egui::RichText::new(self.i18n.tr("pex_command_preview"))
+                                        .strong(),
+                                );
                                 let mut preview_text = self.pex.entries[i].command.clone();
                                 ui.add(
                                     egui::TextEdit::multiline(&mut preview_text)
@@ -214,10 +221,12 @@ impl NebulaToolsApp {
                                     .show(ui, |ui| {
                                         ui.label(self.i18n.tr("pex_start_tick"));
                                         ui.add(
-                                            egui::DragValue::new(&mut self.pex.entries[i].start_tick)
-                                                .speed(1.0)
-                                                .clamp_range(0.0..=100000.0_f32)
-                                                .suffix(" tick"),
+                                            egui::DragValue::new(
+                                                &mut self.pex.entries[i].start_tick,
+                                            )
+                                            .speed(1.0)
+                                            .clamp_range(0.0..=100000.0_f32)
+                                            .suffix(" tick"),
                                         );
                                         ui.end_row();
 
@@ -292,7 +301,8 @@ impl NebulaToolsApp {
                                                     ui.horizontal(|ui| {
                                                         ui.label(format!("[{}]", t_idx));
                                                         ui.text_edit_singleline(
-                                                            &mut self.pex.entries[i].textures[t_idx],
+                                                            &mut self.pex.entries[i].textures
+                                                                [t_idx],
                                                         );
                                                         if ui.button("❌").clicked() {
                                                             to_remove = Some(t_idx);
@@ -306,21 +316,34 @@ impl NebulaToolsApp {
                                         }
 
                                         ui.horizontal(|ui| {
-                                            if ui.button(self.i18n.tr("pex_add_texture")).clicked() {
-                                                self.pex.entries[i]
-                                                    .textures
-                                                    .push("minecraft:textures/particle/glitter_0.png".to_string());
+                                            if ui.button(self.i18n.tr("pex_add_texture")).clicked()
+                                            {
+                                                self.pex.entries[i].textures.push(
+                                                    "minecraft:textures/particle/glitter_0.png"
+                                                        .to_string(),
+                                                );
                                             }
-                                            if ui.button(self.i18n.tr("pex_reset_default_textures")).clicked() {
+                                            if ui
+                                                .button(self.i18n.tr("pex_reset_default_textures"))
+                                                .clicked()
+                                            {
                                                 self.pex.entries[i].textures = vec![
-                                                    "minecraft:textures/particle/glitter_0.png".to_string(),
-                                                    "minecraft:textures/particle/glitter_1.png".to_string(),
-                                                    "minecraft:textures/particle/glitter_2.png".to_string(),
-                                                    "minecraft:textures/particle/glitter_3.png".to_string(),
-                                                    "minecraft:textures/particle/glitter_4.png".to_string(),
-                                                    "minecraft:textures/particle/glitter_5.png".to_string(),
-                                                    "minecraft:textures/particle/glitter_6.png".to_string(),
-                                                    "minecraft:textures/particle/glitter_7.png".to_string(),
+                                                    "minecraft:textures/particle/glitter_0.png"
+                                                        .to_string(),
+                                                    "minecraft:textures/particle/glitter_1.png"
+                                                        .to_string(),
+                                                    "minecraft:textures/particle/glitter_2.png"
+                                                        .to_string(),
+                                                    "minecraft:textures/particle/glitter_3.png"
+                                                        .to_string(),
+                                                    "minecraft:textures/particle/glitter_4.png"
+                                                        .to_string(),
+                                                    "minecraft:textures/particle/glitter_5.png"
+                                                        .to_string(),
+                                                    "minecraft:textures/particle/glitter_6.png"
+                                                        .to_string(),
+                                                    "minecraft:textures/particle/glitter_7.png"
+                                                        .to_string(),
                                                 ];
                                                 self.pex.entries[i].texture_interval = 20;
                                             }
@@ -527,7 +550,11 @@ impl NebulaToolsApp {
         self.sync_entry_from_text_if_needed(index);
 
         ui.horizontal(|ui| {
-            ui.heading(format!("#{} {}", index + 1, self.i18n.tr("pex_command_editor_title")));
+            ui.heading(format!(
+                "#{} {}",
+                index + 1,
+                self.i18n.tr("pex_command_editor_title")
+            ));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button(format!("x {}", self.i18n.tr("close"))).clicked() {
                     *close = true;
@@ -539,8 +566,16 @@ impl NebulaToolsApp {
         {
             let entry = &mut self.pex.entries[index];
             ui.horizontal(|ui| {
-                ui.selectable_value(&mut entry.editor_mode, ParticleexEditorMode::Wizard, self.i18n.tr("pex_editor_wizard"));
-                ui.selectable_value(&mut entry.editor_mode, ParticleexEditorMode::Text, self.i18n.tr("pex_editor_text"));
+                ui.selectable_value(
+                    &mut entry.editor_mode,
+                    ParticleexEditorMode::Wizard,
+                    self.i18n.tr("pex_editor_wizard"),
+                );
+                ui.selectable_value(
+                    &mut entry.editor_mode,
+                    ParticleexEditorMode::Text,
+                    self.i18n.tr("pex_editor_text"),
+                );
                 if let Some(model) = &entry.wizard_model {
                     ui.separator();
                     ui.label(egui::RichText::new(model.format_label()).monospace());
@@ -639,9 +674,15 @@ impl NebulaToolsApp {
                 });
                 ui.horizontal(|ui| {
                     ui.label(self.i18n.tr("pex_wizard_velocity"));
-                    wizard_changed |= ui.text_edit_singleline(&mut model.base_velocity[0]).changed();
-                    wizard_changed |= ui.text_edit_singleline(&mut model.base_velocity[1]).changed();
-                    wizard_changed |= ui.text_edit_singleline(&mut model.base_velocity[2]).changed();
+                    wizard_changed |= ui
+                        .text_edit_singleline(&mut model.base_velocity[0])
+                        .changed();
+                    wizard_changed |= ui
+                        .text_edit_singleline(&mut model.base_velocity[1])
+                        .changed();
+                    wizard_changed |= ui
+                        .text_edit_singleline(&mut model.base_velocity[2])
+                        .changed();
                 });
             });
 
@@ -686,7 +727,11 @@ impl NebulaToolsApp {
                     if let Some(expr) = model.condition_expr.as_mut() {
                         ui.label(self.i18n.tr("pex_wizard_condition_expr"));
                         wizard_changed |= ui
-                            .add(egui::TextEdit::multiline(expr).desired_rows(4).code_editor())
+                            .add(
+                                egui::TextEdit::multiline(expr)
+                                    .desired_rows(4)
+                                    .code_editor(),
+                            )
                             .changed();
                     }
                 }
@@ -707,7 +752,11 @@ impl NebulaToolsApp {
                     if let Some(expr) = model.shape_expr.as_mut() {
                         ui.label(self.i18n.tr("pex_wizard_shape_expr"));
                         wizard_changed |= ui
-                            .add(egui::TextEdit::multiline(expr).desired_rows(5).code_editor())
+                            .add(
+                                egui::TextEdit::multiline(expr)
+                                    .desired_rows(5)
+                                    .code_editor(),
+                            )
                             .changed();
                     }
                     if model.format.is_animated() {
@@ -737,7 +786,11 @@ impl NebulaToolsApp {
                 ui.label(self.i18n.tr("pex_wizard_speed_expr"));
                 if let Some(expr) = model.speed_expr.as_mut() {
                     wizard_changed |= ui
-                        .add(egui::TextEdit::multiline(expr).desired_rows(4).code_editor())
+                        .add(
+                            egui::TextEdit::multiline(expr)
+                                .desired_rows(4)
+                                .code_editor(),
+                        )
                         .changed();
                 }
 
@@ -893,8 +946,7 @@ impl NebulaToolsApp {
                     self.pex.status_msg = Some(self.i18n.tr("apply_success").to_string());
                 }
                 Err(e) => {
-                    self.pex.status_msg =
-                        Some(format!("{}: {}", self.i18n.tr("apply_failed"), e));
+                    self.pex.status_msg = Some(format!("{}: {}", self.i18n.tr("apply_failed"), e));
                 }
             }
         }

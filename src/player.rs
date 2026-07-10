@@ -54,6 +54,64 @@ pub struct PlayerState {
     pub frame_timer: f32,
 }
 
+#[derive(Debug)]
+pub struct EncodedFrameBlob {
+    pub compressed: Vec<u8>,
+}
+
+#[derive(Debug)]
+pub struct ExportChunkResult {
+    pub start_frame: u32,
+    pub end_frame: u32,
+    pub bbox_min: [f32; 3],
+    pub bbox_max: [f32; 3],
+    pub keyframe_indices: Vec<u32>,
+    pub blobs: Vec<EncodedFrameBlob>,
+}
+
+fn write_nbl_header<W: Write>(
+    writer: &mut W,
+    header: &NblHeader,
+    textures: &[TextureEntry],
+    total_frames: u32,
+    bbox_min: [f32; 3],
+    bbox_max: [f32; 3],
+) -> Result<()> {
+    writer.write_all(MAGIC)?;
+    writer.write_u16::<LittleEndian>(header.version)?;
+    writer.write_u16::<LittleEndian>(header.target_fps)?;
+    writer.write_u32::<LittleEndian>(total_frames)?;
+    writer.write_u16::<LittleEndian>(textures.len() as u16)?;
+    writer.write_u16::<LittleEndian>(header.attributes)?;
+    for v in &bbox_min {
+        writer.write_f32::<LittleEndian>(*v)?;
+    }
+    for v in &bbox_max {
+        writer.write_f32::<LittleEndian>(*v)?;
+    }
+    writer.write_all(&[0u8; 4])?;
+    Ok(())
+}
+
+fn write_texture_block<W: Write>(writer: &mut W, textures: &[TextureEntry]) -> Result<()> {
+    for tex in textures {
+        let path_bytes = tex.path.as_bytes();
+        writer.write_u16::<LittleEndian>(path_bytes.len() as u16)?;
+        writer.write_all(path_bytes)?;
+        writer.write_u8(tex.rows)?;
+        writer.write_u8(tex.cols)?;
+    }
+    Ok(())
+}
+
+fn texture_block_size(textures: &[TextureEntry]) -> usize {
+    let mut tex_block_size: usize = 0;
+    for tex in textures {
+        tex_block_size += 2 + tex.path.as_bytes().len() + 1 + 1;
+    }
+    tex_block_size
+}
+
 impl Default for PlayerState {
     fn default() -> Self {
         Self {
@@ -395,6 +453,156 @@ impl PlayerState {
         }
 
         f.flush()?;
+        Ok(())
+    }
+
+    pub fn build_export_chunk<F>(
+        &self,
+        start_frame: u32,
+        end_frame: u32,
+        chunk_start: u32,
+        keyframe_interval: u32,
+        frame_provider: &mut F,
+    ) -> Result<ExportChunkResult>
+    where
+        F: FnMut(u32) -> Result<Vec<Particle>>,
+    {
+        let mut bbox_min = [f32::MAX; 3];
+        let mut bbox_max = [f32::MIN; 3];
+        let mut keyframe_indices = Vec::new();
+        let mut blobs = Vec::with_capacity((end_frame - start_frame) as usize);
+        let mut previous_written_snapshot: Vec<Particle> = Vec::new();
+        let effective_interval = keyframe_interval.max(1);
+
+        for frame_idx in start_frame..end_frame {
+            let mut frame_particles = frame_provider(frame_idx)?;
+            frame_particles.sort_unstable_by_key(|p| p.id);
+
+            for p in &frame_particles {
+                for axis in 0..3 {
+                    bbox_min[axis] = bbox_min[axis].min(p.pos[axis]);
+                    bbox_max[axis] = bbox_max[axis].max(p.pos[axis]);
+                }
+            }
+
+            let force_iframe = frame_idx == start_frame
+                || frame_idx == chunk_start
+                || (frame_idx - chunk_start) % effective_interval == 0
+                || (frame_idx > start_frame
+                    && check_velocity_overflow(&previous_written_snapshot, &frame_particles));
+
+            let raw = if force_iframe {
+                keyframe_indices.push(frame_idx);
+                encode_i_frame(&frame_particles)
+            } else {
+                encode_p_frame(&previous_written_snapshot, &frame_particles)
+            };
+            let compressed = zstd::encode_all(Cursor::new(&raw), 3)?;
+            blobs.push(EncodedFrameBlob { compressed });
+            previous_written_snapshot = frame_particles;
+        }
+
+        if bbox_min[0] == f32::MAX {
+            bbox_min = [0.0; 3];
+            bbox_max = [0.0; 3];
+        }
+
+        Ok(ExportChunkResult {
+            start_frame,
+            end_frame,
+            bbox_min,
+            bbox_max,
+            keyframe_indices,
+            blobs,
+        })
+    }
+
+    pub fn write_chunked_nbl(
+        &self,
+        path: &PathBuf,
+        header: &NblHeader,
+        textures: &[TextureEntry],
+        total_frames: u32,
+        mut chunks: Vec<ExportChunkResult>,
+    ) -> Result<()> {
+        chunks.sort_unstable_by_key(|chunk| chunk.start_frame);
+
+        let file = File::create(path)?;
+        let mut writer = BufWriter::new(file);
+
+        let tex_block_size = texture_block_size(textures);
+        let frame_index_table_size = total_frames as usize * 12;
+        let keyframe_index_table_reserved_size = 4 + total_frames as usize * 4;
+        let data_start =
+            48 + tex_block_size + frame_index_table_size + keyframe_index_table_reserved_size;
+
+        write_nbl_header(
+            &mut writer,
+            header,
+            textures,
+            total_frames,
+            [0.0; 3],
+            [0.0; 3],
+        )?;
+        write_texture_block(&mut writer, textures)?;
+
+        let current_pos = writer.stream_position()?;
+        let padding_size = data_start as u64 - current_pos;
+        let zeros = vec![0u8; 8192];
+        let mut remaining = padding_size;
+        while remaining > 0 {
+            let chunk = remaining.min(8192) as usize;
+            writer.write_all(&zeros[..chunk])?;
+            remaining -= chunk as u64;
+        }
+
+        let mut global_bbox_min = [f32::MAX; 3];
+        let mut global_bbox_max = [f32::MIN; 3];
+        let mut index_entries: Vec<(u64, u32)> = Vec::with_capacity(total_frames as usize);
+        let mut keyframe_indices = Vec::new();
+        let mut current_offset = data_start as u64;
+
+        for chunk in &chunks {
+            for axis in 0..3 {
+                global_bbox_min[axis] = global_bbox_min[axis].min(chunk.bbox_min[axis]);
+                global_bbox_max[axis] = global_bbox_max[axis].max(chunk.bbox_max[axis]);
+            }
+            keyframe_indices.extend(chunk.keyframe_indices.iter().copied());
+            for blob in &chunk.blobs {
+                writer.write_all(&blob.compressed)?;
+                index_entries.push((current_offset, blob.compressed.len() as u32));
+                current_offset += blob.compressed.len() as u64;
+            }
+        }
+
+        if global_bbox_min[0] == f32::MAX {
+            global_bbox_min = [0.0; 3];
+            global_bbox_max = [0.0; 3];
+        }
+
+        writer.flush()?;
+        writer.seek(SeekFrom::Start(0))?;
+        write_nbl_header(
+            &mut writer,
+            header,
+            textures,
+            total_frames,
+            global_bbox_min,
+            global_bbox_max,
+        )?;
+
+        writer.seek(SeekFrom::Start((48 + tex_block_size) as u64))?;
+        for (offset, size) in &index_entries {
+            writer.write_u64::<LittleEndian>(*offset)?;
+            writer.write_u32::<LittleEndian>(*size)?;
+        }
+
+        writer.write_u32::<LittleEndian>(keyframe_indices.len() as u32)?;
+        for frame_idx in keyframe_indices {
+            writer.write_u32::<LittleEndian>(frame_idx)?;
+        }
+
+        writer.flush()?;
         Ok(())
     }
 }

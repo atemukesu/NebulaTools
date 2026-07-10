@@ -10,6 +10,14 @@ use serde::{self, Deserialize, Serialize};
 use std::fs;
 use std::sync::{Arc, Mutex};
 
+#[derive(Clone, Default)]
+pub struct MultimediaThreadProgress {
+    pub start_frame: u32,
+    pub end_frame: u32,
+    pub current_frame: u32,
+    pub status: String,
+}
+
 #[derive(PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub enum AppMode {
     Edit,
@@ -232,6 +240,7 @@ pub struct MultimediaState {
     pub point_size: f32,    // 粒子个体的大小 (Point Size)
     pub density: f32,
     pub rotation: [f32; 3],
+    pub export_threads: usize,
     pub status_msg: Option<String>,
     pub processing_progress: Option<f32>,
     pub is_processing: bool,
@@ -245,11 +254,14 @@ pub struct MultimediaState {
     #[serde(skip)]
     pub last_source_size: Option<[u32; 2]>,
     #[serde(skip)]
+    pub thread_progress: Vec<MultimediaThreadProgress>,
+    #[serde(skip)]
     pub video_compile_shared: Option<(
         std::sync::Arc<std::sync::Mutex<f32>>,
         std::sync::Arc<std::sync::Mutex<Option<String>>>,
         std::sync::Arc<std::sync::Mutex<bool>>,
         std::sync::Arc<std::sync::Mutex<Option<Vec<Vec<crate::player::Particle>>>>>,
+        std::sync::Arc<std::sync::Mutex<Vec<MultimediaThreadProgress>>>,
     )>,
 }
 
@@ -289,6 +301,7 @@ impl Default for MultimediaState {
             point_size: 0.05,
             density: 0.5,
             rotation: [0.0, 0.0, 0.0],
+            export_threads: 4,
             status_msg: None,
             processing_progress: None,
             is_processing: false,
@@ -298,6 +311,7 @@ impl Default for MultimediaState {
             preview_timer: 0.0,
             source_image_preview: None,
             last_source_size: None,
+            thread_progress: Vec::new(),
             video_compile_shared: None,
         }
     }
@@ -750,7 +764,9 @@ impl eframe::App for NebulaToolsApp {
 
                 // 1. Back to Home button (if in a tool mode and no file is being edited)
                 if self.player.header.is_none()
-                    && (self.mode == AppMode::Particleex || self.mode == AppMode::Multimedia || self.mode == AppMode::Creator)
+                    && (self.mode == AppMode::Particleex
+                        || self.mode == AppMode::Multimedia
+                        || self.mode == AppMode::Creator)
                 {
                     if ui.button(format!("🏠 {}", self.i18n.tr("home"))).clicked() {
                         self.mode = AppMode::Preview; // Preview mode with no header = Welcome Screen
@@ -785,8 +801,16 @@ impl eframe::App for NebulaToolsApp {
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(egui::Button::new(egui::RichText::new("💖").size(16.0)).frame(false)).on_hover_text(self.i18n.tr("sponsor")).clicked() {
-                        ui.ctx().output_mut(|o| o.open_url = Some(egui::output::OpenUrl::new_tab("https://afdian.com/a/atommix")));
+                    if ui
+                        .add(egui::Button::new(egui::RichText::new("💖").size(16.0)).frame(false))
+                        .on_hover_text(self.i18n.tr("sponsor"))
+                        .clicked()
+                    {
+                        ui.ctx().output_mut(|o| {
+                            o.open_url = Some(egui::output::OpenUrl::new_tab(
+                                "https://afdian.com/a/atommix",
+                            ))
+                        });
                     }
                 });
             });
