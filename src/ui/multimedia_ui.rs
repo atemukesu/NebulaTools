@@ -1453,6 +1453,8 @@ impl NebulaToolsApp {
                 let media_path = media_path.clone();
                 let velocity_expr = velocity_expr.clone();
                 let thread_progress = shared_threads.clone();
+                let shared_progress_worker = shared_progress.clone();
+                let ctx_worker = ctx_clone.clone();
 
                 worker_handles.push(std::thread::spawn(
                     move || -> anyhow::Result<crate::player::ExportChunkResult> {
@@ -1508,6 +1510,22 @@ impl NebulaToolsApp {
                                     entry.current_frame = frame_idx;
                                 }
                             }
+                            let completed_frames = if let Ok(progress) = thread_progress.lock() {
+                                progress
+                                    .iter()
+                                    .map(|entry| {
+                                        entry.current_frame
+                                            .saturating_sub(entry.start_frame)
+                                            .min(entry.end_frame.saturating_sub(entry.start_frame))
+                                    })
+                                    .sum::<u32>()
+                            } else {
+                                0
+                            };
+                            if let Ok(mut pct) = shared_progress_worker.lock() {
+                                *pct = (completed_frames as f32 / total_frames as f32).min(1.0);
+                            }
+                            ctx_worker.request_repaint();
                             if stdout.read_exact(&mut buffer).is_err() {
                                 return Err(anyhow::anyhow!(
                                     "Failed: video ended before frame {} could be decoded.",
@@ -1540,6 +1558,22 @@ impl NebulaToolsApp {
                                 entry.status = MultimediaThreadStatus::Encoded;
                             }
                         }
+                        let completed_frames = if let Ok(progress) = thread_progress.lock() {
+                            progress
+                                .iter()
+                                .map(|entry| {
+                                    entry.current_frame
+                                        .saturating_sub(entry.start_frame)
+                                        .min(entry.end_frame.saturating_sub(entry.start_frame))
+                                })
+                                .sum::<u32>()
+                        } else {
+                            0
+                        };
+                        if let Ok(mut pct) = shared_progress_worker.lock() {
+                            *pct = (completed_frames as f32 / total_frames as f32).min(1.0);
+                        }
+                        ctx_worker.request_repaint();
                         Ok(chunk)
                     },
                 ));
