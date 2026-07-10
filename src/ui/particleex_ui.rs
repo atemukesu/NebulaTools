@@ -1,4 +1,4 @@
-use super::app::{NebulaToolsApp, PexCommandEntry};
+use super::app::{build_texture_entries, NebulaToolsApp, PexCommandEntry};
 use crate::particleex::{
     self, CompileEntry, ParticleexCommand, ParticleexCommandFormat, ParticleexEditorMode,
 };
@@ -850,7 +850,7 @@ impl NebulaToolsApp {
         };
 
         let raw_textures = self.pex.preview_textures.clone().unwrap_or_default();
-        let textures = self.build_texture_entries(&raw_textures);
+        let textures = build_texture_entries(&raw_textures);
 
         let (bbox_min, bbox_max) = player::recalculate_bbox(&frames);
         let header = NblHeader {

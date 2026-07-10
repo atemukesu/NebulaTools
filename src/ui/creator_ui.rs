@@ -1,4 +1,4 @@
-use super::app::{CreatorPreset, NebulaToolsApp};
+use super::app::{build_texture_entries, CreatorPreset, NebulaToolsApp};
 use crate::player::{recalculate_bbox, NblHeader, Particle};
 use eframe::egui;
 
@@ -944,7 +944,7 @@ impl NebulaToolsApp {
                     }
                 }
 
-                let textures = self.build_texture_entries(&self.creator.texture_animation.textures);
+                let textures = build_texture_entries(&self.creator.texture_animation.textures);
                 let header = NblHeader {
                     version: 1,
                     target_fps: self.creator.target_fps,

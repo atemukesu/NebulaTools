@@ -229,11 +229,19 @@ pub fn default_particle_textures() -> Vec<String> {
     ]
 }
 
+pub fn default_texture_interval_value() -> u32 {
+    20
+}
+
+pub fn default_texture_interval() -> u32 {
+    default_texture_interval_value()
+}
+
 impl Default for TextureAnimationConfig {
     fn default() -> Self {
         Self {
             textures: default_particle_textures(),
-            texture_interval: 20,
+            texture_interval: default_texture_interval_value(),
         }
     }
 }
@@ -474,6 +482,18 @@ impl Default for CreatorState {
     }
 }
 
+pub fn build_texture_entries(textures: &[String]) -> Vec<TextureEntry> {
+    textures
+        .iter()
+        .cloned()
+        .map(|path| TextureEntry {
+            path,
+            rows: 1,
+            cols: 1,
+        })
+        .collect()
+}
+
 pub struct NebulaToolsApp {
     pub player: PlayerState,
     pub config: AppConfig,
@@ -590,7 +610,7 @@ impl NebulaToolsApp {
                     }
                     if ui.button(reset_label.into()).clicked() {
                         *textures = default_particle_textures();
-                        *texture_interval = 20;
+                        *texture_interval = default_texture_interval();
                     }
                 });
             });
@@ -616,18 +636,6 @@ impl NebulaToolsApp {
                 particle.seq_index = 0;
             }
         }
-    }
-
-    pub fn build_texture_entries(&self, textures: &[String]) -> Vec<TextureEntry> {
-        textures
-            .iter()
-            .cloned()
-            .map(|path| TextureEntry {
-                path,
-                rows: 1,
-                cols: 1,
-            })
-            .collect()
     }
 
     pub fn prepare_render_data(&self) -> Vec<f32> {

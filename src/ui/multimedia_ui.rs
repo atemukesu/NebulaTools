@@ -1,5 +1,5 @@
 use crate::player::{NblHeader, Particle};
-use crate::ui::app::NebulaToolsApp;
+use crate::ui::app::{build_texture_entries, NebulaToolsApp};
 use ab_glyph::{Font, PxScale, ScaleFont};
 use eframe::egui;
 use image::{DynamicImage, GenericImageView};
@@ -1043,8 +1043,7 @@ impl NebulaToolsApp {
                 .save_file()
             {
                 let (bbox_min, bbox_max) = crate::player::recalculate_bbox(frames);
-                let textures =
-                    self.build_texture_entries(&self.multimedia.texture_animation.textures);
+                let textures = build_texture_entries(&self.multimedia.texture_animation.textures);
                 let header = NblHeader {
                     version: 1,
                     target_fps: self.multimedia.target_fps,
