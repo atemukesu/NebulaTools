@@ -1,6 +1,6 @@
 use crate::i18n::I18nManager;
 use crate::particleex::{ParticleexCommand, ParticleexCommandFormat, ParticleexEditorMode};
-use crate::player::{NblHeader, Particle, PlayerState};
+use crate::player::{NblHeader, Particle, PlayerState, TextureEntry};
 use crate::renderer::ParticleRenderer;
 use eframe::{
     egui, egui_glow,
@@ -210,6 +210,34 @@ impl OutroPreset {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TextureAnimationConfig {
+    pub textures: Vec<String>,
+    pub texture_interval: u32,
+}
+
+pub fn default_particle_textures() -> Vec<String> {
+    vec![
+        "minecraft:textures/particle/glitter_0.png".to_string(),
+        "minecraft:textures/particle/glitter_1.png".to_string(),
+        "minecraft:textures/particle/glitter_2.png".to_string(),
+        "minecraft:textures/particle/glitter_3.png".to_string(),
+        "minecraft:textures/particle/glitter_4.png".to_string(),
+        "minecraft:textures/particle/glitter_5.png".to_string(),
+        "minecraft:textures/particle/glitter_6.png".to_string(),
+        "minecraft:textures/particle/glitter_7.png".to_string(),
+    ]
+}
+
+impl Default for TextureAnimationConfig {
+    fn default() -> Self {
+        Self {
+            textures: default_particle_textures(),
+            texture_interval: 20,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct MultimediaState {
     pub mode: usize,
@@ -232,6 +260,7 @@ pub struct MultimediaState {
     pub point_size: f32,    // 粒子个体的大小 (Point Size)
     pub density: f32,
     pub rotation: [f32; 3],
+    pub texture_animation: TextureAnimationConfig,
     pub status_msg: Option<String>,
     pub processing_progress: Option<f32>,
     pub is_processing: bool,
@@ -289,6 +318,7 @@ impl Default for MultimediaState {
             point_size: 0.05,
             density: 0.5,
             rotation: [0.0, 0.0, 0.0],
+            texture_animation: TextureAnimationConfig::default(),
             status_msg: None,
             processing_progress: None,
             is_processing: false,
@@ -329,16 +359,7 @@ impl Default for PexCommandEntry {
             position: [0.0, 0.0, 0.0],
             duration_override: 0.0,
             enabled: true,
-            textures: vec![
-                "minecraft:textures/particle/glitter_0.png".to_string(),
-                "minecraft:textures/particle/glitter_1.png".to_string(),
-                "minecraft:textures/particle/glitter_2.png".to_string(),
-                "minecraft:textures/particle/glitter_3.png".to_string(),
-                "minecraft:textures/particle/glitter_4.png".to_string(),
-                "minecraft:textures/particle/glitter_5.png".to_string(),
-                "minecraft:textures/particle/glitter_6.png".to_string(),
-                "minecraft:textures/particle/glitter_7.png".to_string(),
-            ],
+            textures: default_particle_textures(),
             texture_interval: 20,
         }
     }
@@ -404,6 +425,7 @@ pub struct CreatorState {
     pub velocity_expr: String,
     pub target_fps: u16,
     pub duration_secs: f32,
+    pub texture_animation: TextureAnimationConfig,
     pub status_msg: Option<String>,
     #[serde(skip)]
     pub preview_frames: Option<Vec<Vec<Particle>>>,
@@ -439,6 +461,7 @@ impl Default for CreatorState {
             velocity_expr: "vx=0; vy=0; vz=0".to_string(),
             target_fps: 30,
             duration_secs: 5.0,
+            texture_animation: TextureAnimationConfig::default(),
             status_msg: None,
             preview_frames: None,
             preview_playing: false,
@@ -511,6 +534,100 @@ impl NebulaToolsApp {
         self.config.lang = lang_id.clone();
         self.i18n.active_lang = lang_id;
         self.save_config();
+    }
+
+    pub fn show_texture_animation_editor(
+        ui: &mut egui::Ui,
+        section_label: impl Into<String>,
+        interval_label: impl Into<String>,
+        sequence_label: impl Into<String>,
+        add_label: impl Into<String>,
+        reset_label: impl Into<String>,
+        textures: &mut Vec<String>,
+        texture_interval: &mut u32,
+    ) {
+        egui::CollapsingHeader::new(section_label.into())
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(interval_label.into());
+                    ui.add(
+                        egui::DragValue::new(texture_interval)
+                            .speed(1.0)
+                            .clamp_range(1..=1000)
+                            .suffix(" tick"),
+                    );
+                });
+
+                ui.add_space(4.0);
+                ui.label(sequence_label.into());
+
+                let mut to_remove = None;
+                let tex_len = textures.len();
+
+                egui::Frame::none()
+                    .fill(ui.visuals().faint_bg_color)
+                    .inner_margin(4.0)
+                    .show(ui, |ui| {
+                        for t_idx in 0..tex_len {
+                            ui.horizontal(|ui| {
+                                ui.label(format!("[{}]", t_idx));
+                                ui.text_edit_singleline(&mut textures[t_idx]);
+                                if ui.button("❌").clicked() {
+                                    to_remove = Some(t_idx);
+                                }
+                            });
+                        }
+                    });
+
+                if let Some(rem_idx) = to_remove {
+                    textures.remove(rem_idx);
+                }
+
+                ui.horizontal(|ui| {
+                    if ui.button(add_label.into()).clicked() {
+                        textures.push("minecraft:textures/particle/glitter_0.png".to_string());
+                    }
+                    if ui.button(reset_label.into()).clicked() {
+                        *textures = default_particle_textures();
+                        *texture_interval = 20;
+                    }
+                });
+            });
+    }
+
+    pub fn apply_texture_animation_to_frames(
+        &self,
+        frames: &mut [Vec<Particle>],
+        textures: &[String],
+        texture_interval: u32,
+    ) {
+        if textures.is_empty() {
+            return;
+        }
+
+        let interval = texture_interval.max(1) as usize;
+        let texture_count = textures.len();
+
+        for (frame_idx, frame) in frames.iter_mut().enumerate() {
+            let tex_id = ((frame_idx / interval) % texture_count) as u8;
+            for particle in frame.iter_mut() {
+                particle.tex_id = tex_id;
+                particle.seq_index = 0;
+            }
+        }
+    }
+
+    pub fn build_texture_entries(&self, textures: &[String]) -> Vec<TextureEntry> {
+        textures
+            .iter()
+            .cloned()
+            .map(|path| TextureEntry {
+                path,
+                rows: 1,
+                cols: 1,
+            })
+            .collect()
     }
 
     pub fn prepare_render_data(&self) -> Vec<f32> {
@@ -750,7 +867,9 @@ impl eframe::App for NebulaToolsApp {
 
                 // 1. Back to Home button (if in a tool mode and no file is being edited)
                 if self.player.header.is_none()
-                    && (self.mode == AppMode::Particleex || self.mode == AppMode::Multimedia || self.mode == AppMode::Creator)
+                    && (self.mode == AppMode::Particleex
+                        || self.mode == AppMode::Multimedia
+                        || self.mode == AppMode::Creator)
                 {
                     if ui.button(format!("🏠 {}", self.i18n.tr("home"))).clicked() {
                         self.mode = AppMode::Preview; // Preview mode with no header = Welcome Screen
@@ -785,8 +904,16 @@ impl eframe::App for NebulaToolsApp {
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(egui::Button::new(egui::RichText::new("💖").size(16.0)).frame(false)).on_hover_text(self.i18n.tr("sponsor")).clicked() {
-                        ui.ctx().output_mut(|o| o.open_url = Some(egui::output::OpenUrl::new_tab("https://afdian.com/a/atommix")));
+                    if ui
+                        .add(egui::Button::new(egui::RichText::new("💖").size(16.0)).frame(false))
+                        .on_hover_text(self.i18n.tr("sponsor"))
+                        .clicked()
+                    {
+                        ui.ctx().output_mut(|o| {
+                            o.open_url = Some(egui::output::OpenUrl::new_tab(
+                                "https://afdian.com/a/atommix",
+                            ))
+                        });
                     }
                 });
             });

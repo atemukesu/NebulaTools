@@ -167,9 +167,7 @@ impl NebulaToolsApp {
                                                 }
                                             }
                                         }
-                                        if let Some(status) =
-                                            &self.creator.flap_schedule_status
-                                        {
+                                        if let Some(status) = &self.creator.flap_schedule_status {
                                             ui.add_space(2.0);
                                             ui.label(status.as_str());
                                         }
@@ -460,6 +458,18 @@ impl NebulaToolsApp {
                             );
                         });
 
+                        ui.add_space(6.0);
+                        Self::show_texture_animation_editor(
+                            ui,
+                            self.i18n.tr("pex_texture_animation"),
+                            self.i18n.tr("pex_texture_interval"),
+                            self.i18n.tr("pex_texture_sequence"),
+                            self.i18n.tr("pex_add_texture"),
+                            self.i18n.tr("pex_reset_default_textures"),
+                            &mut self.creator.texture_animation.textures,
+                            &mut self.creator.texture_animation.texture_interval,
+                        );
+
                         ui.add_space(20.0);
 
                         if ui
@@ -603,44 +613,44 @@ impl NebulaToolsApp {
         } else {
             0
         };
-        
+
         // Pre-compute trigger frame indices for schedule mode
-        let trigger_frames: std::collections::HashSet<u32> = if self.creator.flap_mode == 1 
-            && !self.creator.flap_schedule.is_empty() 
-        {
-            self.creator.flap_schedule
-                .iter()
-                .filter_map(|&st| {
-                    let frame = (st * target_fps as f32).round() as i32;
-                    if frame >= 0 && frame < total_frames as i32 {
-                        Some(frame as u32)
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        } else {
-            std::collections::HashSet::new()
-        };
-        
-        let base_speed = self.creator.butterfly_speed * 10.0;  // Base flapping speed
-        let decay_rate = 5.0;                                 // Decay constant
-        let min_amplitude = 0.05;                              // Minimum amplitude (ensures subtle movement)
-        
+        let trigger_frames: std::collections::HashSet<u32> =
+            if self.creator.flap_mode == 1 && !self.creator.flap_schedule.is_empty() {
+                self.creator
+                    .flap_schedule
+                    .iter()
+                    .filter_map(|&st| {
+                        let frame = (st * target_fps as f32).round() as i32;
+                        if frame >= 0 && frame < total_frames as i32 {
+                            Some(frame as u32)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            } else {
+                std::collections::HashSet::new()
+            };
+
+        let base_speed = self.creator.butterfly_speed * 10.0; // Base flapping speed
+        let decay_rate = 5.0; // Decay constant
+        let min_amplitude = 0.05; // Minimum amplitude (ensures subtle movement)
+
         let mut frames: Vec<Vec<Particle>> = Vec::with_capacity(total_frames as usize);
         // Store base particles (without trails) separately to prevent recursive explosion
         let mut base_frames: Vec<Vec<Particle>> = Vec::with_capacity(total_frames as usize);
-        
-        // Phase accumulator for smooth integration 
+
+        // Phase accumulator for smooth integration
         let mut current_phase = 0.0f32;
         let mut current_amplitude = 0.0f32;
         let mut last_time = 0.0f32;
-        
+
         for f in 0..total_frames {
             let mut particles = Vec::with_capacity(count as usize * 2);
             let time = f as f32 / target_fps as f32;
             let dt = if f == 0 { 0.0 } else { time - last_time };
-        
+
             // ---- Amplitude update (schedule mode only) ----
             if self.creator.flap_mode == 1 {
                 // Exponential decay
@@ -654,7 +664,7 @@ impl NebulaToolsApp {
                     current_amplitude = current_amplitude * 0.8 + target_amplitude * 0.2;
                 }
             }
-        
+
             // ---- Compute effective speed and active amplitude ----
             let (effective_speed, active_amplitude) = if self.creator.flap_mode == 0 {
                 // Continuous mode: constant speed, full amplitude
@@ -663,17 +673,17 @@ impl NebulaToolsApp {
                 // Schedule mode: speed proportional to current amplitude
                 (base_speed * current_amplitude * 2.5, current_amplitude)
             };
-        
+
             // Update phase
             current_phase += effective_speed * dt;
             let flutter_t = current_phase;
-        
+
             // Record current frame time for next iteration
             last_time = time;
-        
+
             // Define "rest pose" when butterfly is completely still (0.0 = flat, 0.3 = nice V-shape)
             let rest_pose = 0.3f32;
-            
+
             let mut pid: i32 = 0;
 
             // ── Upper Wing (Fay's butterfly curve, main lobes) ──
@@ -867,10 +877,10 @@ impl NebulaToolsApp {
                 } else {
                     0
                 };
-                
+
                 // Trail particle sampling rate (30% of particles generate trails, configurable)
                 let trail_sample_rate = 0.3f32;
-                
+
                 for tf in start..f {
                     let age = (f - tf) as f32 / trail_frames as f32;
                     let alpha_factor = (1.0 - age) * trail_opacity;
@@ -879,7 +889,7 @@ impl NebulaToolsApp {
                     if let Some(prev_base) = base_frames.get(tf as usize) {
                         use rand::Rng;
                         let mut rng = rand::thread_rng();
-                        
+
                         for pp in prev_base.iter() {
                             // Use probabilistic sampling instead of modulo to avoid regular patterns
                             if rng.gen::<f32>() > trail_sample_rate {
@@ -903,6 +913,11 @@ impl NebulaToolsApp {
             frames.push(particles);
         }
 
+        self.apply_texture_animation_to_frames(
+            &mut frames,
+            &self.creator.texture_animation.textures,
+            self.creator.texture_animation.texture_interval,
+        );
         self.creator.preview_frames = Some(frames);
         self.creator.preview_frame_idx = 0;
         self.creator.preview_playing = true;
@@ -929,21 +944,18 @@ impl NebulaToolsApp {
                     }
                 }
 
+                let textures = self.build_texture_entries(&self.creator.texture_animation.textures);
                 let header = NblHeader {
                     version: 1,
                     target_fps: self.creator.target_fps,
                     total_frames: frames.len() as u32,
-                    texture_count: 0,
+                    texture_count: textures.len() as u16,
                     attributes: 3, // 1 (has_alpha) + 2 (has_size)
                     bbox_min,
                     bbox_max,
                 };
 
-                let empty_textures: Vec<crate::player::TextureEntry> = Vec::new();
-                match self
-                    .player
-                    .save_file(&path, &header, &empty_textures, frames)
-                {
+                match self.player.save_file(&path, &header, &textures, frames) {
                     Ok(_) => {
                         self.creator.status_msg = Some(self.i18n.tr("export_success").to_string())
                     }

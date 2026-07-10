@@ -152,6 +152,17 @@ impl NebulaToolsApp {
                             self.show_expression_editor(ui);
                             ui.separator();
                             self.show_multimedia_common_settings(ui);
+                            ui.separator();
+                            Self::show_texture_animation_editor(
+                                ui,
+                                self.i18n.tr("pex_texture_animation"),
+                                self.i18n.tr("pex_texture_interval"),
+                                self.i18n.tr("pex_texture_sequence"),
+                                self.i18n.tr("pex_add_texture"),
+                                self.i18n.tr("pex_reset_default_textures"),
+                                &mut self.multimedia.texture_animation.textures,
+                                &mut self.multimedia.texture_animation.texture_interval,
+                            );
                         });
 
                         ui.add_space(8.0);
@@ -264,7 +275,12 @@ impl NebulaToolsApp {
                         }
                         // Pick up compiled frames
                         if let Ok(mut frames_lock) = frames_arc.lock() {
-                            if let Some(frames) = frames_lock.take() {
+                            if let Some(mut frames) = frames_lock.take() {
+                                self.apply_texture_animation_to_frames(
+                                    &mut frames,
+                                    &self.multimedia.texture_animation.textures,
+                                    self.multimedia.texture_animation.texture_interval,
+                                );
                                 self.multimedia.preview_frames = Some(frames);
                                 self.multimedia.preview_playing = true;
                                 self.multimedia.preview_frame_idx = 0;
@@ -1008,6 +1024,11 @@ impl NebulaToolsApp {
                 frames.push(frame_particles);
             }
 
+            self.apply_texture_animation_to_frames(
+                &mut frames,
+                &self.multimedia.texture_animation.textures,
+                self.multimedia.texture_animation.texture_interval,
+            );
             self.multimedia.preview_frames = Some(frames);
             self.multimedia.status_msg = Some("Compilation Success!".to_string());
             self.multimedia.preview_playing = true;
@@ -1022,17 +1043,19 @@ impl NebulaToolsApp {
                 .save_file()
             {
                 let (bbox_min, bbox_max) = crate::player::recalculate_bbox(frames);
+                let textures =
+                    self.build_texture_entries(&self.multimedia.texture_animation.textures);
                 let header = NblHeader {
                     version: 1,
                     target_fps: self.multimedia.target_fps,
                     total_frames: frames.len() as u32,
-                    texture_count: 0,
+                    texture_count: textures.len() as u16,
                     attributes: 0x03,
                     bbox_min,
                     bbox_max,
                 };
 
-                match self.player.save_file(&path, &header, &[], frames) {
+                match self.player.save_file(&path, &header, &textures, frames) {
                     Ok(_) => self.multimedia.status_msg = Some("Export success!".into()),
                     Err(e) => self.multimedia.status_msg = Some(format!("Export failed: {}", e)),
                 }
