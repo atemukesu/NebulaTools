@@ -5,3 +5,7 @@ dist
 
 # TRAE
 .trae
+
+# Claude / agent tooling
+.claude/
+.agent/
