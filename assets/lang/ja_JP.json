@@ -81,6 +81,7 @@
     "grid": "グリッド表示",
     "has_alpha": "アルファあり",
     "has_size": "サイズあり",
+    "high_particle_count_warning": "パーティクル数が多すぎます。サンプリング密度を下げてください。",
     "home": "ホーム",
     "image": "画像",
     "import": ".nbl インポート",

@@ -81,6 +81,7 @@
     "grid": "显示网格",
     "has_alpha": "颜色包含 Alpha",
     "has_size": "包含大小信息",
+    "high_particle_count_warning": "粒子数量过多，请减小采样密度。",
     "home": "首页",
     "image": "图片",
     "import": "导入 .nbl",

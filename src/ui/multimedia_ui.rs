@@ -1,11 +1,15 @@
 use crate::player::{NblHeader, Particle};
-use crate::ui::app::{MultimediaThreadProgress, MultimediaThreadStatus, build_texture_entries, NebulaToolsApp};
+use crate::ui::app::{
+    build_texture_entries, MultimediaThreadProgress, MultimediaThreadStatus, NebulaToolsApp,
+};
 use ab_glyph::{Font, PxScale, ScaleFont};
 use eframe::egui;
 use image::{DynamicImage, GenericImageView};
 use std::io::Read;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
+
+const HIGH_PARTICLE_WARNING_THRESHOLD: usize = 100_000;
 
 fn apply_euler_rotation(mut x: f32, mut y: f32, mut z: f32, rot: [f32; 3]) -> (f32, f32, f32) {
     let (sx, cx) = rot[0].to_radians().sin_cos();
@@ -426,6 +430,12 @@ impl NebulaToolsApp {
                                     self.i18n.tr("estimated_count"),
                                     est_count
                                 ));
+                                if est_count >= HIGH_PARTICLE_WARNING_THRESHOLD {
+                                    ui.colored_label(
+                                        egui::Color32::from_rgb(255, 80, 80),
+                                        self.i18n.tr("high_particle_count_warning"),
+                                    );
+                                }
                             }
                         }
                         ui.add_space(8.0);
@@ -1534,7 +1544,8 @@ impl NebulaToolsApp {
                                 progress
                                     .iter()
                                     .map(|entry| {
-                                        entry.current_frame
+                                        entry
+                                            .current_frame
                                             .saturating_sub(entry.start_frame)
                                             .min(entry.end_frame.saturating_sub(entry.start_frame))
                                     })
@@ -1582,7 +1593,8 @@ impl NebulaToolsApp {
                             progress
                                 .iter()
                                 .map(|entry| {
-                                    entry.current_frame
+                                    entry
+                                        .current_frame
                                         .saturating_sub(entry.start_frame)
                                         .min(entry.end_frame.saturating_sub(entry.start_frame))
                                 })

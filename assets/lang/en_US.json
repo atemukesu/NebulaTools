@@ -81,6 +81,7 @@
     "grid": "Show Grid",
     "has_alpha": "Has Alpha",
     "has_size": "Has Size",
+    "high_particle_count_warning": "Too many particles. Please reduce the sampling density.",
     "home": "Home",
     "image": "Image",
     "import": "Import .nbl",
