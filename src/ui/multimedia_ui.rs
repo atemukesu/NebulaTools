@@ -6,7 +6,6 @@ use ab_glyph::{Font, PxScale, ScaleFont};
 use eframe::egui;
 use image::{DynamicImage, GenericImageView};
 use std::io::Read;
-use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 
@@ -552,7 +551,27 @@ impl NebulaToolsApp {
                                 &self.multimedia.texture_animation.textures,
                                 self.multimedia.texture_animation.texture_interval,
                             );
-                            self.finalize_multimedia_preview_from_frames(frames);
+                            let saved_path = self.multimedia.preview_output_path.clone();
+                            self.finalize_multimedia_preview_from_frames(
+                                frames,
+                                saved_path.as_deref().map(std::path::Path::new),
+                            );
+                        } else if let Some(saved_path) = self.multimedia.preview_output_path.clone() {
+                            match self.load_preview_frames_from_nbl(std::path::Path::new(&saved_path)) {
+                                Ok(frames) => {
+                                    self.finalize_multimedia_preview_from_frames(
+                                        frames,
+                                        Some(std::path::Path::new(&saved_path)),
+                                    );
+                                }
+                                Err(e) => {
+                                    self.multimedia.status_msg = Some(format!(
+                                        "{} {}",
+                                        self.i18n.tr("multimedia_preview_load_failed"),
+                                        e
+                                    ));
+                                }
+                            }
                         }
                         self.multimedia.thread_progress.clear();
                         self.multimedia.video_compile_shared = None;
@@ -926,7 +945,10 @@ impl NebulaToolsApp {
         self.prepare_render_data_from(&frames[idx])
     }
 
-    fn load_preview_frames_from_nbl(&mut self, path: &std::path::Path) -> anyhow::Result<Vec<Vec<Particle>>> {
+    fn load_preview_frames_from_nbl(
+        &mut self,
+        path: &std::path::Path,
+    ) -> anyhow::Result<Vec<Vec<Particle>>> {
         let mut player = crate::player::PlayerState::default();
         player.load_file(path.to_path_buf())?;
         let total_frames = player
@@ -942,10 +964,6 @@ impl NebulaToolsApp {
             frames.push(frame_particles);
         }
         Ok(frames)
-    }
-
-    fn build_multimedia_preview_path(&self) -> PathBuf {
-        std::env::temp_dir().join("nebula_tools_multimedia_preview.nbl")
     }
 
     fn save_preview_frames_to_nbl(
@@ -969,25 +987,71 @@ impl NebulaToolsApp {
         self.load_preview_frames_from_nbl(path)
     }
 
-    fn finalize_multimedia_preview_from_frames(&mut self, frames: Vec<Vec<Particle>>) {
+    fn choose_multimedia_preview_path(&mut self) -> Option<std::path::PathBuf> {
+        let mut dialog = rfd::FileDialog::new().add_filter("Nebula", &["nbl"]);
+        if let Some(existing) = &self.multimedia.preview_output_path {
+            dialog = dialog.set_file_name(
+                std::path::Path::new(existing)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("multimedia_preview.nbl"),
+            );
+        } else {
+            dialog = dialog.set_file_name("multimedia_preview.nbl");
+        }
+        let path = dialog.save_file()?;
+        self.multimedia.preview_output_path = Some(path.to_string_lossy().to_string());
+        Some(path)
+    }
+
+    fn finalize_multimedia_preview_from_frames(
+        &mut self,
+        frames: Vec<Vec<Particle>>,
+        saved_path: Option<&std::path::Path>,
+    ) {
+        if let Some(path) = saved_path {
+            self.multimedia.preview_output_path = Some(path.to_string_lossy().to_string());
+        }
         self.multimedia.preview_frames = Some(frames);
-        self.multimedia.status_msg = Some("Compilation Success! Preview loaded from local NBL.".to_string());
+        self.multimedia.status_msg = Some(format!(
+            "{}: {}",
+            self.i18n.tr("multimedia_preview_ready"),
+            self.multimedia
+                .preview_output_path
+                .as_deref()
+                .unwrap_or(self.i18n.tr("multimedia_preview_no_path"))
+        ));
         self.multimedia.preview_playing = true;
         self.multimedia.preview_frame_idx = 0;
+        self.multimedia.preview_timer = 0.0;
     }
 
     fn compile_multimedia_preview(&mut self, ctx: &egui::Context, source_only: bool) {
         self.multimedia.status_msg = Some(
             if source_only {
-                "Refreshing source..."
+                self.i18n.tr("multimedia_refreshing_source")
             } else {
-                "Compiling preview..."
+                self.i18n.tr("multimedia_compiling_preview")
             }
             .to_string(),
         );
 
         let mode = self.multimedia.mode;
         self.multimedia.source_image_preview = None;
+
+        let preview_path = if source_only {
+            None
+        } else {
+            match self.choose_multimedia_preview_path() {
+                Some(path) => Some(path),
+                None => {
+                    self.multimedia.status_msg = Some(
+                        self.i18n.tr("multimedia_preview_save_cancelled").to_string(),
+                    );
+                    return;
+                }
+            }
+        };
 
         let mut img: Option<DynamicImage> = None;
 
@@ -1116,12 +1180,14 @@ impl NebulaToolsApp {
                 }
 
                 if source_only {
-                    self.multimedia.status_msg = Some("Source preview updated".into());
+                    self.multimedia.status_msg =
+                        Some(self.i18n.tr("multimedia_source_preview_updated").to_string());
                     return;
                 }
 
-                // Compile video preview by exporting to a local NBL first
-                self.compile_video_preview_via_nbl(ctx);
+                if let Some(preview_path) = preview_path.as_deref() {
+                    self.compile_video_preview_via_nbl(ctx, preview_path.to_path_buf());
+                }
                 return;
             } else {
                 self.multimedia.status_msg = Some("No Video selected".into());
@@ -1138,7 +1204,8 @@ impl NebulaToolsApp {
                 Some(ctx.load_texture("multimedia_source_preview", color_img, Default::default()));
 
             if source_only {
-                self.multimedia.status_msg = Some("Source preview updated".into());
+                self.multimedia.status_msg =
+                    Some(self.i18n.tr("multimedia_source_preview_updated").to_string());
                 return;
             }
 
@@ -1406,21 +1473,32 @@ impl NebulaToolsApp {
                 frames.push(frame_particles);
             }
 
-            let preview_path = self.build_multimedia_preview_path();
-            match self.save_preview_frames_to_nbl(&preview_path, &frames) {
-                Ok(preview_frames) => {
-                    self.finalize_multimedia_preview_from_frames(preview_frames);
-                }
-                Err(e) => {
-                    self.multimedia.status_msg = Some(format!("Preview NBL failed: {}", e));
+            if let Some(preview_path) = preview_path.as_deref() {
+                match self.save_preview_frames_to_nbl(preview_path, &frames) {
+                    Ok(preview_frames) => {
+                        self.finalize_multimedia_preview_from_frames(
+                            preview_frames,
+                            Some(preview_path),
+                        );
+                    }
+                    Err(e) => {
+                        self.multimedia.status_msg = Some(format!(
+                            "{} {}",
+                            self.i18n.tr("multimedia_preview_nbl_failed"),
+                            e
+                        ));
+                    }
                 }
             }
         }
     }
 
-    fn compile_video_preview_via_nbl(&mut self, ctx: &egui::Context) {
-        let preview_path = self.build_multimedia_preview_path();
-        self.export_video_nbl_streaming(ctx, preview_path);
+    fn compile_video_preview_via_nbl(
+        &mut self,
+        ctx: &egui::Context,
+        path: std::path::PathBuf,
+    ) {
+        self.export_video_nbl_streaming(ctx, path);
     }
 
     fn export_video_nbl_streaming(&mut self, ctx: &egui::Context, path: std::path::PathBuf) {

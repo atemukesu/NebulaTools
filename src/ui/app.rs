@@ -307,6 +307,8 @@ pub struct MultimediaState {
     #[serde(skip)]
     pub last_source_size: Option<[u32; 2]>,
     #[serde(skip)]
+    pub preview_output_path: Option<String>,
+    #[serde(skip)]
     pub thread_progress: Vec<MultimediaThreadProgress>,
     #[serde(skip)]
     pub video_compile_shared: Option<(
@@ -365,6 +367,7 @@ impl Default for MultimediaState {
             preview_timer: 0.0,
             source_image_preview: None,
             last_source_size: None,
+            preview_output_path: None,
             thread_progress: Vec::new(),
             video_compile_shared: None,
         }
