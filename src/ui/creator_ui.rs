@@ -1,4 +1,4 @@
-use super::app::{CreatorPreset, NebulaToolsApp};
+use super::app::{build_texture_entries, CreatorPreset, NebulaToolsApp};
 use crate::player::{recalculate_bbox, NblHeader, Particle};
 use eframe::egui;
 
@@ -458,6 +458,18 @@ impl NebulaToolsApp {
                             );
                         });
 
+                        ui.add_space(6.0);
+                        Self::show_texture_animation_editor(
+                            ui,
+                            self.i18n.tr("pex_texture_animation"),
+                            self.i18n.tr("pex_texture_interval"),
+                            self.i18n.tr("pex_texture_sequence"),
+                            self.i18n.tr("pex_add_texture"),
+                            self.i18n.tr("pex_reset_default_textures"),
+                            &mut self.creator.texture_animation.textures,
+                            &mut self.creator.texture_animation.texture_interval,
+                        );
+
                         ui.add_space(20.0);
 
                         if ui
@@ -901,6 +913,11 @@ impl NebulaToolsApp {
             frames.push(particles);
         }
 
+        self.apply_texture_animation_to_frames(
+            &mut frames,
+            &self.creator.texture_animation.textures,
+            self.creator.texture_animation.texture_interval,
+        );
         self.creator.preview_frames = Some(frames);
         self.creator.preview_frame_idx = 0;
         self.creator.preview_playing = true;
@@ -927,21 +944,18 @@ impl NebulaToolsApp {
                     }
                 }
 
+                let textures = build_texture_entries(&self.creator.texture_animation.textures);
                 let header = NblHeader {
                     version: 1,
                     target_fps: self.creator.target_fps,
                     total_frames: frames.len() as u32,
-                    texture_count: 0,
+                    texture_count: textures.len() as u16,
                     attributes: 3, // 1 (has_alpha) + 2 (has_size)
                     bbox_min,
                     bbox_max,
                 };
 
-                let empty_textures: Vec<crate::player::TextureEntry> = Vec::new();
-                match self
-                    .player
-                    .save_file(&path, &header, &empty_textures, frames)
-                {
+                match self.player.save_file(&path, &header, &textures, frames) {
                     Ok(_) => {
                         self.creator.status_msg = Some(self.i18n.tr("export_success").to_string())
                     }

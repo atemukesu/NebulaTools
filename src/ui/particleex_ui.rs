@@ -1,8 +1,8 @@
-use super::app::{NebulaToolsApp, PexCommandEntry};
+use super::app::{build_texture_entries, NebulaToolsApp, PexCommandEntry};
 use crate::particleex::{
     self, CompileEntry, ParticleexCommand, ParticleexCommandFormat, ParticleexEditorMode,
 };
-use crate::player::{self, NblHeader, TextureEntry};
+use crate::player::{self, NblHeader};
 use eframe::egui;
 
 impl NebulaToolsApp {
@@ -119,8 +119,16 @@ impl NebulaToolsApp {
                                                 self.i18n.tr("pex_help_example_title"),
                                             )
                                             .strong(),
+                                            egui::RichText::new(
+                                                self.i18n.tr("pex_help_example_title"),
+                                            )
+                                            .strong(),
                                         );
                                         ui.label(
+                                            egui::RichText::new(
+                                                self.i18n.tr("pex_help_example_val"),
+                                            )
+                                            .monospace(),
                                             egui::RichText::new(
                                                 self.i18n.tr("pex_help_example_val"),
                                             )
@@ -205,6 +213,10 @@ impl NebulaToolsApp {
                                     egui::RichText::new(self.i18n.tr("pex_command_preview"))
                                         .strong(),
                                 );
+                                ui.label(
+                                    egui::RichText::new(self.i18n.tr("pex_command_preview"))
+                                        .strong(),
+                                );
                                 let mut preview_text = self.pex.entries[i].command.clone();
                                 ui.add(
                                     egui::TextEdit::multiline(&mut preview_text)
@@ -221,6 +233,12 @@ impl NebulaToolsApp {
                                     .show(ui, |ui| {
                                         ui.label(self.i18n.tr("pex_start_tick"));
                                         ui.add(
+                                            egui::DragValue::new(
+                                                &mut self.pex.entries[i].start_tick,
+                                            )
+                                            .speed(1.0)
+                                            .clamp_range(0.0..=100000.0_f32)
+                                            .suffix(" tick"),
                                             egui::DragValue::new(
                                                 &mut self.pex.entries[i].start_tick,
                                             )
@@ -272,6 +290,18 @@ impl NebulaToolsApp {
                                 ui.separator();
                                 ui.add_space(4.0);
 
+                                let entry = &mut self.pex.entries[i];
+                                Self::show_texture_animation_editor(
+                                    ui,
+                                    self.i18n.tr("pex_texture_animation"),
+                                    self.i18n.tr("pex_texture_interval"),
+                                    self.i18n.tr("pex_texture_sequence"),
+                                    self.i18n.tr("pex_add_texture"),
+                                    self.i18n.tr("pex_reset_default_textures"),
+                                    &mut entry.textures,
+                                    &mut entry.texture_interval,
+                                );
+                            });
                                 egui::CollapsingHeader::new(self.i18n.tr("pex_texture_animation"))
                                     .default_open(false)
                                     .show(ui, |ui| {
@@ -555,6 +585,11 @@ impl NebulaToolsApp {
                 index + 1,
                 self.i18n.tr("pex_command_editor_title")
             ));
+            ui.heading(format!(
+                "#{} {}",
+                index + 1,
+                self.i18n.tr("pex_command_editor_title")
+            ));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button(format!("x {}", self.i18n.tr("close"))).clicked() {
                     *close = true;
@@ -566,6 +601,16 @@ impl NebulaToolsApp {
         {
             let entry = &mut self.pex.entries[index];
             ui.horizontal(|ui| {
+                ui.selectable_value(
+                    &mut entry.editor_mode,
+                    ParticleexEditorMode::Wizard,
+                    self.i18n.tr("pex_editor_wizard"),
+                );
+                ui.selectable_value(
+                    &mut entry.editor_mode,
+                    ParticleexEditorMode::Text,
+                    self.i18n.tr("pex_editor_text"),
+                );
                 ui.selectable_value(
                     &mut entry.editor_mode,
                     ParticleexEditorMode::Wizard,
@@ -683,6 +728,15 @@ impl NebulaToolsApp {
                     wizard_changed |= ui
                         .text_edit_singleline(&mut model.base_velocity[2])
                         .changed();
+                    wizard_changed |= ui
+                        .text_edit_singleline(&mut model.base_velocity[0])
+                        .changed();
+                    wizard_changed |= ui
+                        .text_edit_singleline(&mut model.base_velocity[1])
+                        .changed();
+                    wizard_changed |= ui
+                        .text_edit_singleline(&mut model.base_velocity[2])
+                        .changed();
                 });
             });
 
@@ -732,6 +786,11 @@ impl NebulaToolsApp {
                                     .desired_rows(4)
                                     .code_editor(),
                             )
+                            .add(
+                                egui::TextEdit::multiline(expr)
+                                    .desired_rows(4)
+                                    .code_editor(),
+                            )
                             .changed();
                     }
                 }
@@ -752,6 +811,11 @@ impl NebulaToolsApp {
                     if let Some(expr) = model.shape_expr.as_mut() {
                         ui.label(self.i18n.tr("pex_wizard_shape_expr"));
                         wizard_changed |= ui
+                            .add(
+                                egui::TextEdit::multiline(expr)
+                                    .desired_rows(5)
+                                    .code_editor(),
+                            )
                             .add(
                                 egui::TextEdit::multiline(expr)
                                     .desired_rows(5)
@@ -786,6 +850,11 @@ impl NebulaToolsApp {
                 ui.label(self.i18n.tr("pex_wizard_speed_expr"));
                 if let Some(expr) = model.speed_expr.as_mut() {
                     wizard_changed |= ui
+                        .add(
+                            egui::TextEdit::multiline(expr)
+                                .desired_rows(4)
+                                .code_editor(),
+                        )
                         .add(
                             egui::TextEdit::multiline(expr)
                                 .desired_rows(4)
@@ -916,14 +985,7 @@ impl NebulaToolsApp {
         };
 
         let raw_textures = self.pex.preview_textures.clone().unwrap_or_default();
-        let textures: Vec<TextureEntry> = raw_textures
-            .into_iter()
-            .map(|path| TextureEntry {
-                path,
-                rows: 1,
-                cols: 1,
-            })
-            .collect();
+        let textures = build_texture_entries(&raw_textures);
 
         let (bbox_min, bbox_max) = player::recalculate_bbox(&frames);
         let header = NblHeader {
@@ -946,6 +1008,7 @@ impl NebulaToolsApp {
                     self.pex.status_msg = Some(self.i18n.tr("apply_success").to_string());
                 }
                 Err(e) => {
+                    self.pex.status_msg = Some(format!("{}: {}", self.i18n.tr("apply_failed"), e));
                     self.pex.status_msg = Some(format!("{}: {}", self.i18n.tr("apply_failed"), e));
                 }
             }
