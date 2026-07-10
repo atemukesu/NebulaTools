@@ -162,6 +162,7 @@
     "remove": "Remove",
     "select_image": "Select Image",
     "select_video": "Select Video",
+    "select_video_for_estimate": "Please select a video",
     "size_mode_scale": "Scale Factor",
     "size_mode_scale_desc": "Multiply all particle sizes by a given factor.",
     "size_mode_uniform": "Uniform Size",

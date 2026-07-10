@@ -162,6 +162,7 @@
     "remove": "削除",
     "select_image": "画像選択",
     "select_video": "動画選択",
+    "select_video_for_estimate": "先に動画を選択してください",
     "size_mode_scale": "スケーリング係数",
     "size_mode_scale_desc": "すべてのパーティクルサイズに指定した係数を掛けます。",
     "size_mode_uniform": "一律サイズ",

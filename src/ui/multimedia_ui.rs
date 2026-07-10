@@ -411,12 +411,23 @@ impl NebulaToolsApp {
                         });
 
                         ui.add_space(8.0);
-                        let est_count = self.estimate_multimedia_particles();
-                        ui.label(format!(
-                            "{}: {}",
-                            self.i18n.tr("estimated_count"),
-                            est_count
-                        ));
+                        match self.multimedia.mode {
+                            2 if self.multimedia.last_source_size.is_none() => {
+                                ui.label(format!(
+                                    "{}: {}",
+                                    self.i18n.tr("estimated_count"),
+                                    self.i18n.tr("select_video_for_estimate")
+                                ));
+                            }
+                            _ => {
+                                let est_count = self.estimate_multimedia_particles();
+                                ui.label(format!(
+                                    "{}: {}",
+                                    self.i18n.tr("estimated_count"),
+                                    est_count
+                                ));
+                            }
+                        }
                         ui.add_space(8.0);
 
                         ui.horizontal(|ui| {
@@ -840,6 +851,15 @@ impl NebulaToolsApp {
                     .pick_file()
                 {
                     self.multimedia.media_path = Some(path.to_string_lossy().to_string());
+                    self.multimedia.last_source_size = None;
+                    match probe_video_info(&path.to_string_lossy()) {
+                        Ok(info) => {
+                            self.multimedia.last_source_size = Some([info.width, info.height]);
+                        }
+                        Err(e) => {
+                            self.multimedia.status_msg = Some(format!("Video probe failed: {}", e));
+                        }
+                    }
                 }
             }
             if let Some(path) = &self.multimedia.media_path {

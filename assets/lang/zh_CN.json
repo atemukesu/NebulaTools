@@ -162,6 +162,7 @@
     "remove": "移除",
     "select_image": "选择图片",
     "select_video": "选择视频",
+    "select_video_for_estimate": "请选择视频",
     "size_mode_scale": "缩放系数",
     "size_mode_scale_desc": "将所有粒子大小乘以指定系数。",
     "size_mode_uniform": "统一大小",
