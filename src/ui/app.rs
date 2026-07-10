@@ -10,12 +10,28 @@ use serde::{self, Deserialize, Serialize};
 use std::fs;
 use std::sync::{Arc, Mutex};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MultimediaThreadStatus {
+    Waiting,
+    Decoding,
+    Generating,
+    Encoded,
+    Merging,
+    Done,
+}
+
+impl Default for MultimediaThreadStatus {
+    fn default() -> Self {
+        Self::Waiting
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct MultimediaThreadProgress {
     pub start_frame: u32,
     pub end_frame: u32,
     pub current_frame: u32,
-    pub status: String,
+    pub status: MultimediaThreadStatus,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]

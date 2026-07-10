@@ -1,5 +1,5 @@
 use crate::player::{NblHeader, Particle};
-use crate::ui::app::{MultimediaThreadProgress, NebulaToolsApp};
+use crate::ui::app::{MultimediaThreadProgress, MultimediaThreadStatus, NebulaToolsApp};
 use ab_glyph::{Font, PxScale, ScaleFont};
 use eframe::egui;
 use image::{DynamicImage, GenericImageView};
@@ -206,7 +206,7 @@ impl VideoParticleGenerator {
     }
 }
 
-fn probe_video_info(media_path: &str) -> VideoProbeInfo {
+fn probe_video_info(media_path: &str) -> anyhow::Result<VideoProbeInfo> {
     let probe = Command::new("ffprobe")
         .args([
             "-v",
@@ -219,25 +219,42 @@ fn probe_video_info(media_path: &str) -> VideoProbeInfo {
             "csv=p=0",
             media_path,
         ])
-        .output();
+        .output()
+        .map_err(|e| anyhow::anyhow!("Failed to run ffprobe: {}", e))?;
 
-    if let Ok(out) = probe {
-        let s = String::from_utf8_lossy(&out.stdout);
-        let parts: Vec<&str> = s.trim().split(',').collect();
-        if parts.len() >= 3 {
-            return VideoProbeInfo {
-                width: parts[0].parse::<u32>().unwrap_or(1280),
-                height: parts[1].parse::<u32>().unwrap_or(720),
-                duration: parts[2].parse::<f32>().unwrap_or(10.0),
-            };
-        }
+    if !probe.status.success() {
+        let stderr = String::from_utf8_lossy(&probe.stderr);
+        return Err(anyhow::anyhow!(
+            "ffprobe failed with status {}: {}",
+            probe.status,
+            stderr.trim()
+        ));
     }
 
-    VideoProbeInfo {
-        width: 1280,
-        height: 720,
-        duration: 10.0,
+    let stdout = String::from_utf8_lossy(&probe.stdout);
+    let parts: Vec<&str> = stdout.trim().split(',').collect();
+    if parts.len() < 3 {
+        return Err(anyhow::anyhow!(
+            "ffprobe returned unexpected stream info: {}",
+            stdout.trim()
+        ));
     }
+
+    let width = parts[0]
+        .parse::<u32>()
+        .map_err(|e| anyhow::anyhow!("Invalid ffprobe width '{}': {}", parts[0], e))?;
+    let height = parts[1]
+        .parse::<u32>()
+        .map_err(|e| anyhow::anyhow!("Invalid ffprobe height '{}': {}", parts[1], e))?;
+    let duration = parts[2]
+        .parse::<f32>()
+        .map_err(|e| anyhow::anyhow!("Invalid ffprobe duration '{}': {}", parts[2], e))?;
+
+    Ok(VideoProbeInfo {
+        width,
+        height,
+        duration,
+    })
 }
 
 fn split_frame_ranges(total_frames: u32, chunk_count: usize) -> Vec<(u32, u32)> {
@@ -553,7 +570,7 @@ impl NebulaToolsApp {
                                         idx + 1,
                                         thread.start_frame,
                                         thread.end_frame,
-                                        thread.status
+                                        self.describe_thread_status(thread.status)
                                     ));
                                     ui.add(
                                         egui::ProgressBar::new(pct)
@@ -828,6 +845,17 @@ impl NebulaToolsApp {
             );
         });
         ui.small(self.i18n.tr("export_threads_hint"));
+    }
+
+    fn describe_thread_status(&self, status: MultimediaThreadStatus) -> &'static str {
+        match status {
+            MultimediaThreadStatus::Waiting => self.i18n.tr("export_status_waiting"),
+            MultimediaThreadStatus::Decoding => self.i18n.tr("export_status_decoding"),
+            MultimediaThreadStatus::Generating => self.i18n.tr("export_status_generating"),
+            MultimediaThreadStatus::Encoded => self.i18n.tr("export_status_encoded"),
+            MultimediaThreadStatus::Merging => self.i18n.tr("export_status_merging"),
+            MultimediaThreadStatus::Done => self.i18n.tr("export_status_done"),
+        }
     }
 
     fn prepare_render_data_from_multimedia(&mut self, ctx: &egui::Context) -> Vec<f32> {
@@ -1371,7 +1399,15 @@ impl NebulaToolsApp {
         let ctx_clone = ctx.clone();
 
         std::thread::spawn(move || {
-            let probe = probe_video_info(&media_path);
+            let probe = match probe_video_info(&media_path) {
+                Ok(info) => info,
+                Err(e) => {
+                    *status_clone.lock().unwrap() = Some(format!("Video probe failed: {}", e));
+                    *done_clone.lock().unwrap() = true;
+                    ctx_clone.request_repaint();
+                    return;
+                }
+            };
             let total_frames = (probe.duration * target_fps as f32).ceil().max(1.0) as u32;
             let frame_size = (probe.width * probe.height * 3) as usize;
             let ranges = split_frame_ranges(total_frames, export_threads);
@@ -1384,7 +1420,7 @@ impl NebulaToolsApp {
                         start_frame: *start,
                         end_frame: *end,
                         current_frame: *start,
-                        status: "waiting".to_string(),
+                        status: MultimediaThreadStatus::Waiting,
                     })
                     .collect();
             }
@@ -1400,7 +1436,7 @@ impl NebulaToolsApp {
                     move || -> anyhow::Result<crate::player::ExportChunkResult> {
                         if let Ok(mut progress) = thread_progress.lock() {
                             if let Some(entry) = progress.get_mut(worker_idx) {
-                                entry.status = "decoding".to_string();
+                                entry.status = MultimediaThreadStatus::Decoding;
                             }
                         }
 
@@ -1446,7 +1482,7 @@ impl NebulaToolsApp {
                         let mut provider = |frame_idx: u32| -> anyhow::Result<Vec<Particle>> {
                             if let Ok(mut progress) = thread_progress.lock() {
                                 if let Some(entry) = progress.get_mut(worker_idx) {
-                                    entry.status = "generating".to_string();
+                                    entry.status = MultimediaThreadStatus::Generating;
                                     entry.current_frame = frame_idx;
                                 }
                             }
@@ -1467,13 +1503,21 @@ impl NebulaToolsApp {
                             &mut provider,
                         )?;
 
+                        let wait_status = child.wait()?;
+                        if !wait_status.success() {
+                            return Err(anyhow::anyhow!(
+                                "ffmpeg chunk worker exited with status {} for frames [{}..{})",
+                                wait_status,
+                                start_frame,
+                                end_frame
+                            ));
+                        }
                         if let Ok(mut progress) = thread_progress.lock() {
                             if let Some(entry) = progress.get_mut(worker_idx) {
                                 entry.current_frame = end_frame;
-                                entry.status = "encoded".to_string();
+                                entry.status = MultimediaThreadStatus::Encoded;
                             }
                         }
-                        let _ = child.kill();
                         Ok(chunk)
                     },
                 ));
@@ -1509,7 +1553,7 @@ impl NebulaToolsApp {
 
             if let Ok(mut progress) = shared_threads.lock() {
                 for entry in progress.iter_mut() {
-                    entry.status = "merging".to_string();
+                    entry.status = MultimediaThreadStatus::Merging;
                     entry.current_frame = entry.end_frame;
                 }
             }
@@ -1531,7 +1575,7 @@ impl NebulaToolsApp {
                     *shared_progress.lock().unwrap() = 1.0;
                     if let Ok(mut progress) = shared_threads.lock() {
                         for entry in progress.iter_mut() {
-                            entry.status = "done".to_string();
+                            entry.status = MultimediaThreadStatus::Done;
                         }
                     }
                     *status_clone.lock().unwrap() = Some(format!(
@@ -1593,7 +1637,15 @@ impl NebulaToolsApp {
         let ctx_clone = ctx.clone();
 
         std::thread::spawn(move || {
-            let probe = probe_video_info(&media_path);
+            let probe = match probe_video_info(&media_path) {
+                Ok(info) => info,
+                Err(e) => {
+                    *status_clone.lock().unwrap() = Some(format!("Video probe failed: {}", e));
+                    *done_clone.lock().unwrap() = true;
+                    ctx_clone.request_repaint();
+                    return;
+                }
+            };
 
             let child = Command::new("ffmpeg")
                 .args([
