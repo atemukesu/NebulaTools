@@ -9,3 +9,5 @@ dist
 # Claude / agent tooling
 .claude/
 .agent/
+
+build

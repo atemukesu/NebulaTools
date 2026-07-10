@@ -348,20 +348,47 @@ def generate_changelog():
     log_success(f"更新日志已生成：{changelog_file}")
 
 
+def resolve_github_repo():
+    gh_repo = os.environ.get("GITHUB_REPOSITORY")
+    if gh_repo:
+        return gh_repo
+
+    repo_from_gh = run_cmd(
+        ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
+        capture=True,
+        check=False,
+    )
+    if repo_from_gh:
+        return repo_from_gh.strip()
+
+    remote_url = run_cmd(["git", "remote", "get-url", "origin"], capture=True, check=False)
+    match = re.search(r"github\.com[:/]([^/]+/[^/.]+?)(?:\.git)?$", remote_url)
+    if match:
+        return match.group(1)
+
+    return "atemukesu/NebulaTools"
+
+
 def upload_to_github():
     if not ask_yes_no("是否要将构建产物发布到 GitHub Releases？", default_yes=True):
         log_info("已跳过 GitHub Releases 上传。")
-        return
-
-    gh_repo = os.environ.get("GITHUB_REPOSITORY")
-    if not os.environ.get("GITHUB_TOKEN") or not gh_repo:
-        log_warning("缺少 GITHUB_TOKEN 或 GITHUB_REPOSITORY 环境变量，无法上传。")
         return
 
     if not shutil.which("gh"):
         log_warning("未安装 GitHub CLI (gh)，跳过上传。")
         return
 
+    auth_status = run_cmd(["gh", "auth", "status"], capture=True, check=False)
+    if not auth_status:
+        log_warning("GitHub CLI 尚未登录，请先执行 gh auth login。")
+        return
+
+    gh_repo = resolve_github_repo()
+    if not gh_repo:
+        log_warning("无法识别 GitHub 仓库，请设置 GITHUB_REPOSITORY 或检查 git remote。")
+        return
+
+    log_info(f"使用 GitHub 仓库：{gh_repo}")
     log_info("==========================================")
     log_info("开始上传到 GitHub Releases")
     log_info("==========================================")
